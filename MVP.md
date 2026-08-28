@@ -1,4 +1,4 @@
-# Minimum Viable Product — TestImpact++
+# Minimum Viable Product — diff2test
 
 ## MVP statement
 
@@ -193,4 +193,3 @@ MVP is complete when:
 - docs explain how metadata is generated externally;
 - no third-party runtime dependency or vendored code exists;
 - the five-minute demo has been rehearsed at least twice.
-
