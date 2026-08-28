@@ -2,12 +2,12 @@
 
 ## Purpose
 
-Explain what packages would normally be used and how TestImpact++ replaces them with code written during the event using permitted C++/libc/POSIX facilities.
+Explain what packages would normally be used and how diff2test replaces them with code written during the event using permitted C++/libc/POSIX facilities.
 
 ## Rule boundary and disclosure
 
-- CMake, CTest, Git, and compiler may produce input outside TestImpact++.
-- TestImpact++ never invokes them at runtime.
+- CMake, CTest, Git, and compiler may produce input outside diff2test.
+- diff2test never invokes them at runtime.
 - File API JSON, `.d`, and CTest JSON are disclosed external data formats.
 - Build tool and dev-only test tooling are identified separately.
 - No vendored third-party source ships.
@@ -83,4 +83,3 @@ Link to `DEPENDENCY-PROOF.md` or `deps-proof.txt` and explain system runtime lin
 - [ ] Dev tools distinguished from runtime
 - [ ] No Package Killer claim without evidence
 - [ ] No inflated “from scratch” claim for tool-generated data
-
