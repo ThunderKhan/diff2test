@@ -1,8 +1,8 @@
-# Safety Contract — TestImpact++
+# Safety Contract — diff2test
 
 ## 1. Core invariant
 
-TestImpact++ may output a proper subset of registered tests only when it has positive, complete, supported evidence that every omitted registered test is unaffected under the model it claims to support.
+diff2test may output a proper subset of registered tests only when it has positive, complete, supported evidence that every omitted registered test is unaffected under the model it claims to support.
 
 When completeness cannot be established, it must not guess.
 
@@ -161,4 +161,3 @@ stderr always announces fallback/required states even without verbose mode.
 ## 12. Safety review gate
 
 Before submission, construct a table of every place code can set an “incomplete” flag and verify that each flag reaches the final outcome decision. Add mutation tests manually by removing one evidence element at a time. Any missing edge that still produces `SUBSET_SELECTED` is a release blocker.
-
