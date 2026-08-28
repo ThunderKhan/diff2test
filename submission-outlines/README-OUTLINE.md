@@ -49,9 +49,24 @@ Explain `.d` transitive header role and safety ledger.
 ## Build
 
 - prerequisites that are build tools, not runtime dependencies;
+- state explicitly that CMake is used only as permitted build tooling and is not invoked or required by the `diff2test` runtime artifact;
+- distinguish compiling `diff2test` with CMake from consuming CMake-generated metadata during analysis;
 - one exact clean build command;
 - produced artifact path;
 - optional test command.
+
+## Build-tool vs runtime-dependency boundary
+
+Explain this distinction prominently because judges may reasonably ask whether CMake itself is a dependency:
+
+- the organizer explicitly confirmed that the compiler and build tool are not counted as runtime dependencies;
+- CMake may be used to build `diff2test`;
+- CMake/CTest may also generate metadata before `diff2test` runs;
+- `diff2test` never executes CMake, CTest, Git, a compiler, shell, or other installed program at runtime;
+- the shipped executable contains no CMake library and does not require a CMake process to analyze already-produced files;
+- if CMake/CTest metadata is absent or unusable, `diff2test` degrades conservatively to `FULL_SUITE_SELECTED` or `FULL_SUITE_REQUIRED` rather than trying to invoke the missing tool.
+
+Do not use the vague claim “CMake is not a dependency” without qualification. The precise claim is: **CMake is permitted external build/input-generation tooling, not a third-party runtime dependency of the shipped artifact.**
 
 ## Generate inputs externally
 
@@ -102,7 +117,8 @@ List real unsupported cases:
 - no packages/vendored code;
 - link to `STDLIB.md`;
 - link to dependency proof;
-- disclose external metadata as input.
+- disclose external metadata as input;
+- explicitly separate permitted CMake build/input-generation tooling from runtime dependencies.
 
 ## Verification
 
@@ -134,7 +150,7 @@ OSI-approved license selected during hackathon.
 ## Acknowledgements and evidence
 
 - official CMake/CTest/GCC docs;
-- organizer clarification summary;
+- organizer clarification summary, including the explicit build-tool ruling;
 - no copied code.
 
 ## Final README checklist
@@ -143,6 +159,7 @@ OSI-approved license selected during hackathon.
 - [ ] No placeholder remains
 - [ ] No claim lacks a test/demo
 - [ ] Runtime/build tools distinguished
+- [ ] CMake described precisely as permitted build/input-generation tooling, not a runtime dependency
 - [ ] External metadata generation disclosed
 - [ ] Exit statuses match binary
 - [ ] Limits honest
