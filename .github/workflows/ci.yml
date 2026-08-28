@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact commit without actions
+        shell: bash
+        run: |
+          git init .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --depth=1 origin "${GITHUB_SHA}"
+          git checkout --detach FETCH_HEAD
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build --parallel 2
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Audit runtime subprocess APIs
+        shell: bash
+        run: |
+          if grep -nE '\b(system|popen|pclose|fork|exec[lvpe]*|posix_spawn)\s*\(' diff2test.cpp; then
+            echo 'Unexpected process-spawn API found in runtime source.' >&2
+            exit 1
+          fi
+
+      - name: Show dynamic runtime linkage
+        shell: bash
+        run: |
+          ldd build/diff2test || true
