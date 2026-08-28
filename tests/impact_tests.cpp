@@ -1,5 +1,6 @@
 #define D2T_TESTING
 #include "../diff2test.cpp"
+#include <chrono>
 #include <fstream>
 #include <iostream>
 
@@ -37,10 +38,9 @@ void fixture(const std::filesystem::path& root) {
     const auto build = root / "build";
     const auto reply = build / ".cmake/api/v1/reply";
 
-    std::filesystem::create_directories(project / "src");
-    std::filesystem::create_directories(project / "tests");
-    std::filesystem::create_directories(project / "include");
-    std::filesystem::create_directories(reply);
+    put(project / "src/alpha.cpp", "int alpha_fixture_source;\n");
+    put(project / "tests/alpha_test.cpp", "int alpha_fixture_test_source;\n");
+    put(project / "include/alpha.hpp", "#pragma once\n");
 
     put(reply / "index-a.json",
         R"({"reply":{"codemodel-v2":{"jsonFile":"codemodel.json","kind":"codemodel","version":{"major":2}}}})");
@@ -91,6 +91,25 @@ int main() {
     const auto good = d2t::analysis::analyze(options);
     check(good.outcome == d2t::core::Outcome::SubsetSelected, "subset status");
     check(good.selected_tests == std::vector<std::string>{"AlphaTest"}, "subset contents");
+    check(good.explanations.contains("AlphaTest"), "subset explanation exists");
+    if (good.explanations.contains("AlphaTest")) {
+        const auto& steps = good.explanations.at("AlphaTest");
+        check(steps.size() >= 5, "subset explanation has evidence chain");
+        check(steps.front() == "changed path: include/alpha.hpp", "explanation names changed path");
+        check(steps.back() == "registered test: AlphaTest", "explanation names registered test");
+    }
+
+    fixture(root);
+    const auto stale_dep = root / "build/CMakeFiles/alpha.dir/src/alpha.cpp.o.d";
+    const auto header = root / "project/include/alpha.hpp";
+    std::error_code time_error;
+    const auto header_time = std::filesystem::last_write_time(header, time_error);
+    check(!time_error, "read header timestamp for stale mutation");
+    if (!time_error) {
+        std::filesystem::last_write_time(stale_dep, header_time - std::chrono::seconds(5), time_error);
+        check(!time_error, "set stale dependency timestamp");
+    }
+    expect_full(d2t::analysis::analyze(options), "stale dependency evidence falls back");
 
     fixture(root);
     put(root / "build/deps.txt", "CMakeFiles/alpha_test.dir/tests/alpha_test.cpp.o.d\n");
