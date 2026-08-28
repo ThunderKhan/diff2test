@@ -29,14 +29,14 @@ diff2test analyze \
   --changed-files <file|-> \
   --cmake-reply <dir> \
   --ctest-info <file> \
-  (--dep-root <dir> | --dep-list <file>) \
+  --dep-list <file> \
   [--configuration <name>] \
   [--format human|names] \
   [--explain] \
   [--verbose]
 ```
 
-Final choice between `--dep-root` and `--dep-list` is made by the first-two-hours spike. Supporting both is desirable but not mandatory.
+The kickoff metadata spike found non-compilation `.d` files such as `link.d` in the build tree. To avoid generator-specific guessing, the MVP deliberately requires an explicit `--dep-list`. Recursive `--dep-root` discovery is deferred until a complete and testable mapping policy exists.
 
 ## 4. Options
 
@@ -48,8 +48,7 @@ Final choice between `--dep-root` and `--dep-list` is made by the first-two-hour
 | `--cmake-reply <dir>` | yes | File API v1 reply directory |
 | `--cmake-index <file>` | no | explicit index when reply directory is ambiguous |
 | `--ctest-info <file>` | yes | pre-generated CTest JSON |
-| `--dep-root <dir>` | conditional | recursive dependency-file root |
-| `--dep-list <file>` | conditional | explicit list of dependency files |
+| `--dep-list <file>` | yes | newline-delimited list of compiler dependency files |
 | `--configuration <name>` | conditional | required for multiple codemodel configurations |
 | `--format <value>` | no | `human` default or `names` |
 | `--explain` | no | show evidence paths in human format |
@@ -186,7 +185,7 @@ Important: shell truthiness normally treats nonzero as failure. CI integration m
 Usage error examples:
 
 - missing required option;
-- both `--dep-root` and `--dep-list`;
+- use of removed/unsupported `--dep-root`;
 - `--changed-files -` while stdin is a terminal, if reliably detectable;
 - unknown format/config option;
 - repeated single-valued option;
