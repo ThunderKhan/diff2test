@@ -20,7 +20,7 @@ Important planning fact: CMake writes `index-*.json` beneath `<build>/.cmake/api
 - [ctest(1)](https://cmake.org/cmake/help/latest/manual/ctest.1.html) — `--show-only=json-v1` and Show as JSON Object Model.
 - [CTest Show as JSON Object Model](https://cmake.org/cmake/help/latest/manual/ctest.1.html#show-as-json-object-model) — `ctestInfo` kind/version and test structures.
 
-Important planning fact: `--show-only` lists test information without executing tests; `json-v1` provides a structured format. TestImpact++ consumes a file created earlier and does not invoke CTest.
+Important planning fact: `--show-only` lists test information without executing tests; `json-v1` provides a structured format. diff2test consumes a file created earlier and does not invoke CTest.
 
 ## Compiler dependency files
 
@@ -52,4 +52,3 @@ cppreference is a practical secondary reference. Where standard conformance is d
 - Record any dev-only test framework and disclose it if used.
 - Separate verified format facts from project policy decisions.
 - Update source links if the actual event toolchain uses older format versions than latest documentation.
-
