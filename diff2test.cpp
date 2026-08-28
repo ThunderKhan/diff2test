@@ -313,6 +313,7 @@ struct TranslationUnitKey{
 struct DependencyEvidence{
     std::map<std::filesystem::path,std::set<TranslationUnitKey>> prerequisite_to_units;
     std::set<TranslationUnitKey> covered_units;
+    std::map<TranslationUnitKey,std::filesystem::path> unit_to_file;
 };
 struct Result{
     core::Outcome outcome=core::Outcome::InternalError;
@@ -354,6 +355,9 @@ std::optional<DependencyEvidence> load_dependencies(
         auto dr=io::read_text(dp,16U*1024U*1024U);if(!dr.ok()){error=dr.error;return std::nullopt;}
         auto parsed=dep::parse(*dr.data);if(!parsed.ok()){error="invalid dependency file "+dp.string()+": "+parsed.error->code;return std::nullopt;}
         if(parsed.rules.size()!=1){error="dependency file must contain exactly one compiler rule: "+dp.string();return std::nullopt;}
+        std::error_code dep_time_error;
+        const auto dep_time=std::filesystem::last_write_time(dp,dep_time_error);
+        if(dep_time_error){error="cannot inspect dependency-file timestamp: "+dp.string();return std::nullopt;}
         const auto& rule=parsed.rules.front();
         std::set<std::string> rule_targets;
         for(const auto& token:rule.targets){
@@ -371,6 +375,10 @@ std::optional<DependencyEvidence> load_dependencies(
             auto np=path::normalize(prereq,project_root,build_root,true);if(!np.ok()){error="unsafe dependency prerequisite: "+prereq;return std::nullopt;}
             if(np.value->root_class==path::RootClass::Project){
                 project_prereqs.push_back(np.value->absolute);
+                std::error_code prereq_time_error;
+                const auto prereq_time=std::filesystem::last_write_time(np.value->absolute,prereq_time_error);
+                if(prereq_time_error){error="cannot inspect dependency prerequisite timestamp: "+np.value->absolute.string();return std::nullopt;}
+                if(prereq_time>dep_time){error="stale dependency file "+dp.string()+": prerequisite is newer: "+np.value->absolute.string();return std::nullopt;}
                 auto it=source_owners.find(np.value->absolute);
                 if(it!=source_owners.end()&&it->second.contains(target_id))source_candidates.insert(np.value->absolute);
             }
@@ -378,6 +386,7 @@ std::optional<DependencyEvidence> load_dependencies(
         if(source_candidates.size()!=1){error="dependency rule does not identify exactly one compiled source for its target: "+dp.string();return std::nullopt;}
         TranslationUnitKey unit{target_id,*source_candidates.begin()};
         if(!ev.covered_units.insert(unit).second){error="duplicate dependency evidence for translation unit: "+unit.source.string();return std::nullopt;}
+        ev.unit_to_file.emplace(unit,dp);
         for(const auto& prereq:project_prereqs)ev.prerequisite_to_units[prereq].insert(unit);
     }
     for(const auto& [source,owners]:source_owners)for(const auto& target_id:owners){
@@ -401,7 +410,9 @@ Result analyze(const cli::AnalyzeOptions& opt){
     if(!mapped.complete()){out.outcome=core::Outcome::FullSuiteSelected;out.selected_tests=all_names();out.reasons=mapped.issues;return out;}
     std::string err;auto deps=load_dependencies(opt.dep_list,*model.model,declared_project,declared_build,err);if(!deps)return full(err);
     auto changed=read_lines(opt.changed_files,err);if(!changed||changed->empty()){out.outcome=core::Outcome::UsageError;out.reasons.push_back(changed?"changed path list is empty":err);return out;}
+    std::sort(changed->begin(),changed->end());changed->erase(std::unique(changed->begin(),changed->end()),changed->end());
     std::set<TranslationUnitKey> affected_units;
+    std::map<TranslationUnitKey,std::string> changed_for_unit;
     for(const auto& raw:*changed){
         auto np=path::normalize(raw,declared_project,declared_build,false);
         if(!np.ok()||np.value->root_class!=path::RootClass::Project)return full("unknown or unsafe changed path: "+raw);
@@ -409,22 +420,44 @@ Result analyze(const cli::AnalyzeOptions& opt){
         if(abs.filename()=="CMakeLists.txt"||abs.extension()==".cmake")return full("build configuration changed: "+raw);
         auto it=deps->prerequisite_to_units.find(abs);
         if(it==deps->prerequisite_to_units.end())return full("unknown changed path: "+raw);
-        affected_units.insert(it->second.begin(),it->second.end());
+        for(const auto& unit:it->second){affected_units.insert(unit);changed_for_unit.try_emplace(unit,raw);}
     }
-    std::set<std::string> affected_targets;for(const auto& u:affected_units)affected_targets.insert(u.target_id);
+    std::map<std::string,std::string> target_names;
+    for(const auto& target:model.model->targets)target_names[target.id]=target.name;
+    std::set<std::string> affected_targets;
+    std::map<std::string,TranslationUnitKey> target_origin;
+    for(const auto& unit:affected_units){if(affected_targets.insert(unit.target_id).second)target_origin.emplace(unit.target_id,unit);}
     std::map<std::string,std::set<std::string>> reverse;std::set<std::string> ids;for(const auto& t:model.model->targets)ids.insert(t.id);
     for(const auto& t:model.model->targets)for(const auto& d:t.dependencies){
         if(!ids.contains(d))return full("target dependency references unknown target: "+d);
         reverse[d].insert(t.id);
     }
+    std::map<std::string,std::string> target_parent;
     std::queue<std::string> q;for(const auto& id:affected_targets)q.push(id);
-    while(!q.empty()){auto cur=q.front();q.pop();for(const auto& next:reverse[cur])if(affected_targets.insert(next).second)q.push(next);}
+    while(!q.empty()){
+        auto cur=q.front();q.pop();
+        for(const auto& next:reverse[cur]){
+            if(affected_targets.insert(next).second){target_parent[next]=cur;target_origin[next]=target_origin.at(cur);q.push(next);}
+        }
+    }
     std::map<std::string,std::string> test_to_target;for(const auto& m:mapped.mappings)test_to_target[m.test_name]=m.target_id;
     for(const auto& t:cat.catalogue->tests)if(affected_targets.contains(test_to_target[t.name]))out.selected_tests.push_back(t.name);
     std::sort(out.selected_tests.begin(),out.selected_tests.end());
     out.outcome=core::Outcome::SubsetSelected;
     for(const auto& name:out.selected_tests){
-        out.explanations[name]={"changed path -> compiler dependency evidence","dependency evidence -> affected translation unit","translation unit -> affected target "+test_to_target[name],"target artifact -> registered test "+name};
+        const auto target_id=test_to_target.at(name);
+        const auto origin=target_origin.at(target_id);
+        std::vector<std::string> steps;
+        steps.push_back("changed path: "+changed_for_unit.at(origin));
+        steps.push_back("dependency file: "+deps->unit_to_file.at(origin).lexically_relative(declared_build).generic_string());
+        steps.push_back("translation unit: "+origin.source.lexically_relative(declared_project).generic_string());
+        steps.push_back("owning target: "+target_names.at(origin.target_id));
+        std::vector<std::string> chain;std::string current=target_id;
+        while(current!=origin.target_id){chain.push_back(current);auto parent=target_parent.find(current);if(parent==target_parent.end())break;current=parent->second;}
+        std::reverse(chain.begin(),chain.end());
+        for(const auto& id:chain)steps.push_back("dependent target: "+target_names.at(id));
+        steps.push_back("registered test: "+name);
+        out.explanations[name]=std::move(steps);
     }
     return out;
 }
