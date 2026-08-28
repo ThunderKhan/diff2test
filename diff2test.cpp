@@ -669,6 +669,68 @@ ParseResult parse(std::string_view input) {
 
 }  // namespace d2t::dep
 
+namespace d2t::path {
+
+enum class RootClass {
+    Project,
+    Build,
+    External,
+    Invalid,
+};
+
+struct NormalizedPath {
+    std::filesystem::path absolute;
+    std::filesystem::path display;
+    RootClass root_class = RootClass::Invalid;
+};
+
+struct Result {
+    std::optional<NormalizedPath> value;
+    std::string error;
+
+    bool ok() const { return value.has_value(); }
+};
+
+bool has_prefix(const std::filesystem::path& path, const std::filesystem::path& root) {
+    auto path_it = path.begin();
+    auto root_it = root.begin();
+    for (; root_it != root.end(); ++root_it, ++path_it) {
+        if (path_it == path.end() || *path_it != *root_it) return false;
+    }
+    return true;
+}
+
+Result normalize(std::string_view raw,
+                 const std::filesystem::path& project_root,
+                 const std::filesystem::path& build_root,
+                 bool allow_external = false) {
+    if (raw.empty()) return {std::nullopt, "path is empty"};
+    if (raw.find('\0') != std::string_view::npos) return {std::nullopt, "path contains NUL"};
+
+    const auto project = project_root.lexically_normal();
+    const auto build = build_root.lexically_normal();
+    if (!project.is_absolute() || !build.is_absolute()) {
+        return {std::nullopt, "project and build roots must be absolute"};
+    }
+
+    std::filesystem::path candidate{std::string(raw)};
+    if (!candidate.is_absolute()) candidate = project / candidate;
+    candidate = candidate.lexically_normal();
+
+    if (has_prefix(candidate, project)) {
+        return {NormalizedPath{candidate, candidate.lexically_relative(project), RootClass::Project}, {}};
+    }
+    if (has_prefix(candidate, build)) {
+        return {NormalizedPath{candidate, candidate.lexically_relative(build), RootClass::Build}, {}};
+    }
+    if (allow_external && candidate.is_absolute()) {
+        return {NormalizedPath{candidate, candidate, RootClass::External}, {}};
+    }
+    return {std::nullopt, "path escapes declared project/build roots"};
+}
+
+}  // namespace d2t::path
+
 namespace d2t::cli {
 
 struct AnalyzeOptions {
