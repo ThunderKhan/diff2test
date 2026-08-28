@@ -6,7 +6,7 @@ In five minutes, prove usefulness, zero-dependency craft, explainability, and sa
 
 ## Narrative
 
-> “Running every C++ test is safe but slow. Guessing which tests to skip is fast but dangerous. TestImpact++ reads evidence the build already produced, selects only what it can justify, and asks for the full suite the moment that evidence breaks.”
+> “Running every C++ test is safe but slow. Guessing which tests to skip is fast but dangerous. diff2test reads evidence the build already produced, selects only what it can justify, and asks for the full suite the moment that evidence breaks.”
 
 ## Required environment
 
@@ -42,7 +42,7 @@ Show `ldd`/platform inspection and explain that listed libc/libstdc++/loader ent
 
 ### 1:40–2:40 — Selective success
 
-Supply a changed header and complete metadata. Run `testimpact analyze --explain`. Show:
+Supply a changed header and complete metadata. Run `diff2test analyze --explain`. Show:
 
 - one selected test out of several;
 - affected translation unit and target;
@@ -77,7 +77,7 @@ Show `STDLIB.md` briefly and close:
 The final repository README and this contract must contain exact commands for:
 
 1. clean build;
-2. metadata generation outside TestImpact++;
+2. metadata generation outside diff2test;
 3. narrow analysis;
 4. shared-header analysis;
 5. incomplete-evidence fallback;
@@ -143,4 +143,3 @@ Do not invent final commands now; fill them after the actual build layout exists
 - [ ] `FULL_SUITE_REQUIRED` shown or described if time forces one fallback only
 - [ ] No claim exceeds documented support
 - [ ] Final callout to `STDLIB.md`
-
