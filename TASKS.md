@@ -57,7 +57,7 @@
 - Priority: P0
 - Estimate: 30 min
 - Depends on: T0.5
-- Work: C++20 build configuration producing `testimpact` from one source.
+- Work: C++20 build configuration producing `diff2test` from one source.
 - Accept: clean build succeeds with warnings enabled.
 
 ### T1.2 — Minimal test harness
@@ -316,4 +316,3 @@
 | H+60 | docs/proof complete | no bonuses |
 | H+66 | demo recorded | use buffer for upload/verification |
 | H+70 | final submission ready | emergency corrections only |
-
