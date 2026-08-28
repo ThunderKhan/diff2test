@@ -2,35 +2,176 @@
 #include "../diff2test.cpp"
 #include <fstream>
 #include <iostream>
+
 namespace {
-int failures=0;
-void check(bool c,const char*n){if(!c){std::cerr<<"FAIL: "<<n<<'\n';++failures;}}
-void put(const std::filesystem::path&p,std::string_view t){std::filesystem::create_directories(p.parent_path());std::ofstream o(p);o<<t;}
-d2t::cli::AnalyzeOptions opts(const std::filesystem::path& root){
-    d2t::cli::AnalyzeOptions o;
-    o.project_root=root/"project";o.build_root=root/"build";o.changed_files=(root/"changed.txt").string();
-    o.cmake_reply=root/"build/.cmake/api/v1/reply";o.ctest_info=root/"build/ctest-info.json";o.dep_list=root/"build/deps.txt";o.format="names";
-    return o;
+int failures = 0;
+
+void check(bool condition, const char* name) {
+    if (!condition) {
+        std::cerr << "FAIL: " << name << '\n';
+        ++failures;
+    }
 }
-void fixture(const std::filesystem::path& root){
-    auto p=root/"project";auto b=root/"build";auto r=b/".cmake/api/v1/reply";
-    std::filesystem::create_directories(p/"src");std::filesystem::create_directories(p/"tests");std::filesystem::create_directories(p/"include");std::filesystem::create_directories(r);
-    put(r/"index-a.json",R"({"reply":{"codemodel-v2":{"jsonFile":"codemodel.json","kind":"codemodel","version":{"major":2}}}})");
-    put(r/"codemodel.json",std::string("{\"paths\":{\"source\":\"")+p.string()+"\",\"build\":\""+b.string()+"\"},\"configurations\":[{\"name\":\"\",\"targets\":[{\"id\":\"alpha::x\",\"jsonFile\":\"target-alpha.json\"},{\"id\":\"alpha_test::x\",\"jsonFile\":\"target-alpha-test.json\"}]}]}");
-    put(r/"target-alpha.json",R"({"id":"alpha::x","name":"alpha","type":"STATIC_LIBRARY","sources":[{"path":"src/alpha.cpp"}],"artifacts":[],"dependencies":[]})");
-    put(r/"target-alpha-test.json",R"({"id":"alpha_test::x","name":"alpha_test","type":"EXECUTABLE","sources":[{"path":"tests/alpha_test.cpp"}],"artifacts":[{"path":"alpha_test"}],"dependencies":[{"id":"alpha::x"}]})");
-    put(b/"ctest-info.json",std::string("{\"kind\":\"ctestInfo\",\"version\":{\"major\":1},\"tests\":[{\"name\":\"AlphaTest\",\"command\":[\"")+(b/"alpha_test").string()+"\"]}]}");
-    put(b/"CMakeFiles/alpha.dir/src/alpha.cpp.o.d",std::string("CMakeFiles/alpha.dir/src/alpha.cpp.o: ")+(p/"src/alpha.cpp").string()+" "+(p/"include/alpha.hpp").string()+"\n");
-    put(b/"CMakeFiles/alpha_test.dir/tests/alpha_test.cpp.o.d",std::string("CMakeFiles/alpha_test.dir/tests/alpha_test.cpp.o: ")+(p/"tests/alpha_test.cpp").string()+" "+(p/"include/alpha.hpp").string()+"\n");
-    put(b/"deps.txt","CMakeFiles/alpha.dir/src/alpha.cpp.o.d\nCMakeFiles/alpha_test.dir/tests/alpha_test.cpp.o.d\n");
-    put(root/"changed.txt","include/alpha.hpp\n");
+
+void put(const std::filesystem::path& path, std::string_view text) {
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream out(path);
+    out << text;
 }
+
+d2t::cli::AnalyzeOptions opts(const std::filesystem::path& root) {
+    d2t::cli::AnalyzeOptions options;
+    options.project_root = root / "project";
+    options.build_root = root / "build";
+    options.changed_files = (root / "changed.txt").string();
+    options.cmake_reply = root / "build/.cmake/api/v1/reply";
+    options.ctest_info = root / "build/ctest-info.json";
+    options.dep_list = root / "build/deps.txt";
+    options.format = "names";
+    return options;
 }
-int main(){
-    auto root=std::filesystem::temp_directory_path()/"d2t-impact-tests";std::filesystem::remove_all(root);fixture(root);
-    auto o=opts(root);auto good=d2t::analysis::analyze(o);check(good.outcome==d2t::core::Outcome::SubsetSelected,"subset status");check(good.selected_tests==std::vector<std::string>{"AlphaTest"},"subset contents");
-    put(root/"build/deps.txt","CMakeFiles/alpha_test.dir/tests/alpha_test.cpp.o.d\n");auto missing=d2t::analysis::analyze(o);check(missing.outcome==d2t::core::Outcome::FullSuiteSelected,"missing dep fallback");check(missing.selected_tests==std::vector<std::string>{"AlphaTest"},"fallback emits full catalogue");
-    fixture(root);put(root/"changed.txt","docs/unknown.md\n");auto unknown=d2t::analysis::analyze(o);check(unknown.outcome==d2t::core::Outcome::FullSuiteSelected,"unknown change fallback");
-    fixture(root);std::filesystem::remove(root/"build/ctest-info.json");auto nocat=d2t::analysis::analyze(o);check(nocat.outcome==d2t::core::Outcome::FullSuiteRequired,"missing catalogue required");check(nocat.selected_tests.empty(),"missing catalogue emits no names");
-    std::filesystem::remove_all(root);if(failures==0){std::cout<<"impact_tests: all checks passed\n";return 0;}return 1;
+
+void fixture(const std::filesystem::path& root) {
+    std::filesystem::remove_all(root);
+    const auto project = root / "project";
+    const auto build = root / "build";
+    const auto reply = build / ".cmake/api/v1/reply";
+
+    std::filesystem::create_directories(project / "src");
+    std::filesystem::create_directories(project / "tests");
+    std::filesystem::create_directories(project / "include");
+    std::filesystem::create_directories(reply);
+
+    put(reply / "index-a.json",
+        R"({"reply":{"codemodel-v2":{"jsonFile":"codemodel.json","kind":"codemodel","version":{"major":2}}}})");
+    put(reply / "codemodel.json",
+        std::string("{\"paths\":{\"source\":\"") + project.string() +
+            "\",\"build\":\"" + build.string() +
+            "\"},\"configurations\":[{\"name\":\"\",\"targets\":["
+            "{\"id\":\"alpha::x\",\"jsonFile\":\"target-alpha.json\"},"
+            "{\"id\":\"alpha_test::x\",\"jsonFile\":\"target-alpha-test.json\"}]}]}" );
+    put(reply / "target-alpha.json",
+        R"({"id":"alpha::x","name":"alpha","type":"STATIC_LIBRARY","sources":[{"path":"src/alpha.cpp"}],"artifacts":[],"dependencies":[]})");
+    put(reply / "target-alpha-test.json",
+        R"({"id":"alpha_test::x","name":"alpha_test","type":"EXECUTABLE","sources":[{"path":"tests/alpha_test.cpp"}],"artifacts":[{"path":"alpha_test"}],"dependencies":[{"id":"alpha::x"}]})");
+    put(build / "ctest-info.json",
+        std::string("{\"kind\":\"ctestInfo\",\"version\":{\"major\":1},\"tests\":[{\"name\":\"AlphaTest\",\"command\":[\"") +
+            (build / "alpha_test").string() + "\"]}]}" );
+
+    put(build / "CMakeFiles/alpha.dir/src/alpha.cpp.o.d",
+        std::string("CMakeFiles/alpha.dir/src/alpha.cpp.o: ") +
+            (project / "src/alpha.cpp").string() + " " +
+            (project / "include/alpha.hpp").string() + "\n");
+    put(build / "CMakeFiles/alpha_test.dir/tests/alpha_test.cpp.o.d",
+        std::string("CMakeFiles/alpha_test.dir/tests/alpha_test.cpp.o: ") +
+            (project / "tests/alpha_test.cpp").string() + " " +
+            (project / "include/alpha.hpp").string() + "\n");
+    put(build / "deps.txt",
+        "CMakeFiles/alpha.dir/src/alpha.cpp.o.d\n"
+        "CMakeFiles/alpha_test.dir/tests/alpha_test.cpp.o.d\n");
+    put(root / "changed.txt", "include/alpha.hpp\n");
+}
+
+void expect_full(const d2t::analysis::AnalysisResult& result, const char* name) {
+    check(result.outcome == d2t::core::Outcome::FullSuiteSelected, name);
+    check(result.selected_tests == std::vector<std::string>{"AlphaTest"}, name);
+}
+
+void expect_required(const d2t::analysis::AnalysisResult& result, const char* name) {
+    check(result.outcome == d2t::core::Outcome::FullSuiteRequired, name);
+    check(result.selected_tests.empty(), name);
+}
+}  // namespace
+
+int main() {
+    const auto root = std::filesystem::temp_directory_path() / "d2t-impact-tests";
+    auto options = opts(root);
+
+    fixture(root);
+    const auto good = d2t::analysis::analyze(options);
+    check(good.outcome == d2t::core::Outcome::SubsetSelected, "subset status");
+    check(good.selected_tests == std::vector<std::string>{"AlphaTest"}, "subset contents");
+
+    fixture(root);
+    put(root / "build/deps.txt", "CMakeFiles/alpha_test.dir/tests/alpha_test.cpp.o.d\n");
+    expect_full(d2t::analysis::analyze(options), "missing dependency coverage falls back");
+
+    fixture(root);
+    put(root / "build/CMakeFiles/alpha.dir/src/alpha.cpp.o.d", "this is not a dependency rule\n");
+    expect_full(d2t::analysis::analyze(options), "malformed dependency file falls back");
+
+    fixture(root);
+    std::filesystem::remove(root / "build/deps.txt");
+    expect_full(d2t::analysis::analyze(options), "missing dependency list falls back");
+
+    fixture(root);
+    put(root / "build/deps.txt",
+        "CMakeFiles/alpha.dir/src/alpha.cpp.o.d\n"
+        "CMakeFiles/alpha.dir/src/alpha.cpp.o.d\n"
+        "CMakeFiles/alpha_test.dir/tests/alpha_test.cpp.o.d\n");
+    expect_full(d2t::analysis::analyze(options), "duplicate dependency evidence falls back");
+
+    fixture(root);
+    put(root / "changed.txt", "docs/unknown.md\n");
+    expect_full(d2t::analysis::analyze(options), "unknown changed path falls back");
+
+    fixture(root);
+    put(root / "changed.txt", "CMakeLists.txt\n");
+    expect_full(d2t::analysis::analyze(options), "build configuration change falls back");
+
+    fixture(root);
+    put(root / "build/ctest-info.json", "{");
+    expect_required(d2t::analysis::analyze(options), "malformed CTest catalogue requires full suite");
+
+    fixture(root);
+    put(root / "build/ctest-info.json",
+        R"({"kind":"ctestInfo","version":{"major":2},"tests":[{"name":"AlphaTest","command":["/tmp/alpha_test"]}]})");
+    expect_required(d2t::analysis::analyze(options), "unsupported CTest major requires full suite");
+
+    fixture(root);
+    std::filesystem::remove(root / "build/ctest-info.json");
+    expect_required(d2t::analysis::analyze(options), "missing CTest catalogue requires full suite");
+
+    fixture(root);
+    const auto build = root / "build";
+    put(build / "ctest-info.json",
+        std::string("{\"kind\":\"ctestInfo\",\"version\":{\"major\":1},\"tests\":[{\"name\":\"AlphaTest\",\"command\":[\"/bin/sh\",\"") +
+            (build / "alpha_test").string() + "\"]}]}" );
+    expect_full(d2t::analysis::analyze(options), "wrapper-style test command falls back");
+
+    fixture(root);
+    put(root / "build/.cmake/api/v1/reply/index-a.json", "{");
+    expect_full(d2t::analysis::analyze(options), "malformed CMake index falls back");
+
+    fixture(root);
+    std::filesystem::remove(root / "build/.cmake/api/v1/reply/target-alpha.json");
+    expect_full(d2t::analysis::analyze(options), "missing target object falls back");
+
+    fixture(root);
+    put(root / "build/.cmake/api/v1/reply/index-b.json",
+        R"({"reply":{"codemodel-v2":{"jsonFile":"codemodel.json","kind":"codemodel","version":{"major":2}}}})");
+    expect_full(d2t::analysis::analyze(options), "ambiguous CMake index falls back");
+
+    fixture(root);
+    const auto project = root / "project";
+    put(root / "build/.cmake/api/v1/reply/codemodel.json",
+        std::string("{\"paths\":{\"source\":\"") + (root / "other-project").string() +
+            "\",\"build\":\"" + (root / "build").string() +
+            "\"},\"configurations\":[{\"name\":\"\",\"targets\":["
+            "{\"id\":\"alpha::x\",\"jsonFile\":\"target-alpha.json\"},"
+            "{\"id\":\"alpha_test::x\",\"jsonFile\":\"target-alpha-test.json\"}]}]}" );
+    expect_full(d2t::analysis::analyze(options), "project-root mismatch falls back");
+
+    fixture(root);
+    put(root / "build/.cmake/api/v1/reply/target-alpha-test.json",
+        R"({"id":"alpha_test::x","name":"alpha_test","type":"EXECUTABLE","sources":[{"path":"tests/alpha_test.cpp"}],"artifacts":[{"path":"alpha_test"}],"dependencies":[{"id":"missing::x"}]})");
+    expect_full(d2t::analysis::analyze(options), "unknown target dependency falls back");
+
+    std::filesystem::remove_all(root);
+    if (failures == 0) {
+        std::cout << "impact_tests: all checks passed\n";
+        return 0;
+    }
+    std::cerr << "impact_tests: " << failures << " failure(s)\n";
+    return 1;
 }
