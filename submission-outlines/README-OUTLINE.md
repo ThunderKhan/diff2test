@@ -4,7 +4,7 @@ Use this outline during the hackathon. Replace every placeholder from the actual
 
 ## Header
 
-- TestImpact++
+- diff2test
 - one-line pitch
 - Track A and team `std::zero`
 - concise status badges only if they are real
@@ -62,7 +62,7 @@ Document commands for:
 - `ctest --show-only=json-v1` export;
 - changed paths from Git or a plain file.
 
-State clearly: TestImpact++ does not run these commands.
+State clearly: diff2test does not run these commands.
 
 ## Usage
 
@@ -147,4 +147,3 @@ OSI-approved license selected during hackathon.
 - [ ] Exit statuses match binary
 - [ ] Limits honest
 - [ ] Demo link public
-
