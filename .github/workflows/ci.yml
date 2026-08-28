@@ -29,6 +29,56 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+      - name: Generate controlled fixture metadata externally
+        shell: bash
+        run: |
+          cmake -E make_directory fixture/build/.cmake/api/v1/query
+          cmake -E touch fixture/build/.cmake/api/v1/query/codemodel-v2
+          cmake -S fixture -B fixture/build -DCMAKE_BUILD_TYPE=Debug
+          cmake --build fixture/build --parallel 2
+          ctest --test-dir fixture/build --show-only=json-v1 > fixture/build/ctest-info.json
+          find fixture/build -type f -name '*.o.d' -printf '%P\n' | sort > fixture/build/deps.txt
+          printf 'include/alpha.hpp\n' > fixture/changed.txt
+
+      - name: Verify real selective analysis
+        shell: bash
+        run: |
+          set +e
+          output=$(build/diff2test analyze \
+            --project-root "$(pwd)/fixture" \
+            --build-root "$(pwd)/fixture/build" \
+            --changed-files fixture/changed.txt \
+            --cmake-reply fixture/build/.cmake/api/v1/reply \
+            --ctest-info fixture/build/ctest-info.json \
+            --dep-list fixture/build/deps.txt \
+            --format names 2>fixture/build/selective.err)
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          cat fixture/build/selective.err
+          test "$status" -eq 0
+          test "$output" = 'AlphaTest'
+
+      - name: Verify real missing-evidence fallback
+        shell: bash
+        run: |
+          grep -v 'CMakeFiles/alpha.dir/' fixture/build/deps.txt > fixture/build/deps-incomplete.txt
+          set +e
+          output=$(build/diff2test analyze \
+            --project-root "$(pwd)/fixture" \
+            --build-root "$(pwd)/fixture/build" \
+            --changed-files fixture/changed.txt \
+            --cmake-reply fixture/build/.cmake/api/v1/reply \
+            --ctest-info fixture/build/ctest-info.json \
+            --dep-list fixture/build/deps-incomplete.txt \
+            --format names 2>fixture/build/fallback.err)
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          cat fixture/build/fallback.err
+          test "$status" -eq 10
+          test "$output" = $'AlphaTest\nBetaTest\nCoreTest'
+
       - name: Audit runtime subprocess APIs
         shell: bash
         run: |
