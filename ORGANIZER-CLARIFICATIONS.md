@@ -14,7 +14,7 @@ This file paraphrases the answer into engineering rules. Where exact wording mat
 
 Consequences:
 
-- TestImpact++ must not call Git, CMake, CTest, compilers, Python, shells, or other installed tools.
+- diff2test must not call Git, CMake, CTest, compilers, Python, shells, or other installed tools.
 - No `system`, `popen`, `exec`, process spawning, or indirect command launch is allowed.
 - Help text and documentation must not imply automatic metadata generation.
 
@@ -38,7 +38,7 @@ Permitted data inputs include:
 
 ### 3. Piped changed paths are permitted
 
-Reading changed paths from stdin is standard-library I/O. A user may externally pipe `git diff --name-only` into TestImpact++; TestImpact++ itself must not launch Git.
+Reading changed paths from stdin is standard-library I/O. A user may externally pipe `git diff --name-only` into diff2test; diff2test itself must not launch Git.
 
 ### 4. Build tools are permitted
 
@@ -92,4 +92,3 @@ A submission may qualify by naming a real installable test-impact package, compa
 ## Questions considered resolved
 
 All eight emailed questions are resolved sufficiently to proceed. Any new behavior involving runtime execution, bundled external code, or an undisclosed data producer requires a fresh eligibility check.
-
