@@ -1,8 +1,8 @@
-# Product Requirements Document — TestImpact++
+# Product Requirements Document — diff2test
 
 ## 1. Product overview
 
-TestImpact++ is a local C++20 command-line analyzer for CMake/CTest projects. It consumes a changed-file list and pre-generated build/test metadata, builds an evidence graph, selects tests affected by the changes, explains each selection, and safely requests the full suite when the evidence is insufficient.
+diff2test is a local C++20 command-line analyzer for CMake/CTest projects. It consumes a changed-file list and pre-generated build/test metadata, builds an evidence graph, selects tests affected by the changes, explains each selection, and safely requests the full suite when the evidence is insufficient.
 
 ## 2. Product objective
 
@@ -35,9 +35,9 @@ Reduce unnecessary C++ test execution without introducing silent false-negative 
 ## 5. User journey
 
 1. The project's normal configure/build workflow produces metadata.
-2. The user exports CTest test information to a file outside TestImpact++.
+2. The user exports CTest test information to a file outside diff2test.
 3. The user passes changed paths through stdin or a file.
-4. TestImpact++ validates inputs and format versions.
+4. diff2test validates inputs and format versions.
 5. It builds file, translation-unit, target, artifact, and test relationships.
 6. It evaluates evidence completeness.
 7. It emits either:
@@ -231,4 +231,3 @@ A clean checkout builds and demonstrates selective analysis plus fallback in und
 ## 13. Release policy for the hackathon
 
 Freeze new functionality once all P0 acceptance criteria pass. After freeze, only correctness fixes, tests, docs, demo work, and dependency proof are allowed unless a P0 requirement is impossible and the MVP contract is explicitly revised.
-
