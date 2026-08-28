@@ -5,10 +5,10 @@
 - Inputs are treated as untrusted data.
 - Text input is expected to be UTF-8; ASCII is a valid subset.
 - Embedded NUL is rejected.
-- File-size and nesting limits must be documented in `--help` or README.
+- File-size and nesting limits are enforced where implemented and must be reflected in the final README.
 - Unsupported major format versions are never parsed optimistically.
-- A malformed file is identified by path and position where possible.
-- Paths are compared only after normalization under the declared roots.
+- Malformed structured inputs are never treated as empty evidence.
+- Paths are compared only after lexical normalization under declared roots.
 
 ## 2. Changed-files input
 
@@ -25,26 +25,28 @@ Exactly one of:
 - LF and CRLF accepted;
 - final line may omit newline;
 - blank lines ignored;
-- leading/trailing whitespace is part of a path, not automatically trimmed, except a trailing CR in CRLF;
-- duplicate normalized paths are removed;
-- NUL and newline inside a path are unsupported.
+- a trailing CR from CRLF is removed;
+- duplicate input lines are sorted/deduplicated before analysis;
+- embedded NUL is rejected.
 
 ### Path form
 
 - preferred form: relative to `--project-root` using `/` separators;
-- absolute paths are accepted only if normalization proves they are within the project or build root;
-- `.` segments are removed;
-- `..` is resolved lexically and rejected if it escapes the allowed root;
+- absolute paths are accepted only if normalization proves they remain within the permitted project/build model;
+- `.` and `..` are resolved lexically;
+- root escape is rejected;
 - symlink identity is not blindly canonicalized in MVP;
-- case comparison follows the host filesystem; Linux MVP is case-sensitive.
+- Linux MVP path comparison is case-sensitive.
 
-### Git rename/copy output
+### Git boundary
 
-MVP accepts only one path per line, as produced by ordinary `git diff --name-only`. It does not parse `--name-status`, quoted Git path syntax, `-z`, or `old => new` display abbreviations. Users must supply the actual affected paths, typically both old and new names when deletion/rename semantics matter.
+A user's shell may produce this file or pipe newline-delimited paths from Git. diff2test does not parse raw patches, invoke Git, or support Git-specific rename/status syntaxes in the MVP.
+
+Deleted or renamed paths that no longer appear in current evidence safely cause full-suite behavior when they cannot be mapped.
 
 ### Empty list
 
-An empty list is an invocation error by default because it often indicates a broken pipeline.
+An empty changed-path list is a usage error because it commonly indicates a broken caller pipeline.
 
 ## 3. CMake File API reply
 
@@ -56,38 +58,40 @@ An empty list is an invocation error by default because it often indicates a bro
 <build>/.cmake/api/v1/reply
 ```
 
-The File API query is created externally under the build tree before CMake configure. diff2test never invokes CMake.
+The File API query is created externally under the build tree before CMake configure. CMake is permitted build/input-generation tooling under the organizer ruling; diff2test never invokes it at runtime.
 
 ### Index selection
 
-- if exactly one `index-*.json` exists, it may be used;
-- when reply selection is ambiguous, `--cmake-index <path>` may identify the intended index;
-- missing, ambiguous, malformed, unsupported, or escaping references trigger safe full-suite behavior.
+- exactly one supported `index-*.json` may be selected implicitly;
+- `--cmake-index <path>` may identify an intended index explicitly;
+- missing, ambiguous, malformed, unsupported, or escaping references trigger full-known-suite behavior when the CTest catalogue is readable.
 
 ### Required codemodel data
 
-- supported codemodel major version 2;
-- `paths.source` and `paths.build` matching declared roots;
+The current MVP requires:
+
+- codemodel major version 2;
+- `paths.source` and `paths.build` matching the declared roots after normalization;
 - one selected or unambiguous configuration;
-- target entries with ids and referenced target JSON;
-- target names/types/sources/artifacts/dependencies needed by the MVP.
+- target references with ids and referenced target JSON;
+- target names, types, sources, artifacts, and dependencies needed by the supported mapping.
 
 ### Configuration
 
 - one configuration may be selected implicitly;
-- if more than one exists, `--configuration <name>` is required;
+- if more than one configuration exists, `--configuration <name>` is required;
 - zero or duplicate matches trigger fallback;
 - cross-configuration target/artifact mixing is prohibited.
 
 ### Generated sources
 
-Generated sources/custom-command relationships are not modeled by the current MVP. Encountering a generated source in the supported model triggers full-suite fallback.
+Generated sources/custom-command chains are not modeled by the current MVP. Encountering a codemodel source marked generated prevents subset output.
 
 ## 4. Compiler dependency files
 
 ### Source — frozen MVP decision
 
-The first metadata spike found that a CMake build tree can contain `.d` files that are not compiler prerequisite evidence (for example `link.d`). Therefore the MVP deliberately does **not** recursively treat every `.d` file as a compiler dependency file.
+The metadata spike found that CMake build trees can contain `.d` files that are not compiler prerequisite evidence, such as `link.d`. The MVP therefore deliberately does **not** scan every `.d` file recursively.
 
 The supported input is:
 
@@ -95,37 +99,58 @@ The supported input is:
 --dep-list <file>
 ```
 
-The list contains one dependency-file path per line. Relative entries are resolved under `--build-root`. The files themselves must already have been produced by the external compiler/build workflow; diff2test never invokes that workflow.
+The list contains one dependency-file path per line. Relative entries are resolved under `--build-root`. These dependency files must already have been produced by the external compiler/build workflow; diff2test never launches the compiler or build tool.
 
 ### Supported syntax
 
-GCC/Clang Make-style dependency rules:
+The parser handles the tested GCC/Clang Make-style dependency-rule subset:
 
 ```text
 target: prerequisite prerequisite ...
 ```
 
-The parser supports the tested subset needed for generated dependency files, including backslash-newline continuation, escaped tokens, CRLF, and deterministic prerequisite handling. Malformed input is never treated as an empty dependency relationship.
+Implemented handling includes:
+
+- backslash-newline continuation;
+- escaped tokens required by the tested format;
+- CRLF;
+- comments;
+- deterministic prerequisite deduplication;
+- malformed-rule rejection.
+
+A missing or malformed rule never means “no dependencies.”
 
 ### Current target-mapping boundary
 
-For the controlled MVP using CMake's Unix Makefiles-style object layout, the dependency rule target must map uniquely to a CMake target through the observed layout:
+For the controlled Linux/CMake/Unix-Makefiles workflow, the compiler dependency rule target must map uniquely through the observed layout:
 
 ```text
 CMakeFiles/<target-name>.dir/...
 ```
 
-This is a deliberately narrow, evidence-backed boundary—not a claim that all CMake generators use this layout. An unmatched or ambiguous layout triggers full-suite fallback.
+This is a deliberately narrow, tested MVP boundary. It is not a claim about Ninja, MSVC, Xcode, or every CMake generator. Unmatched or ambiguous target layouts cause `FULL_SUITE_SELECTED` when the test catalogue is known.
 
 ### Translation-unit completeness
 
-Coverage is tracked per **(CMake target, compiled source)** pair. This matters when one source file is compiled into more than one target: evidence for one target does not prove evidence for the others.
+Coverage is tracked per **(CMake target, compiled source)** pair. This matters when one source file is compiled into multiple targets: evidence for one target does not establish evidence for another.
 
-Before `SUBSET_SELECTED` is allowed, every supported compiled `.cpp` translation unit in the in-scope codemodel must have exactly one trusted dependency-file mapping. Missing or duplicate evidence triggers `FULL_SUITE_SELECTED` when the test catalogue is known.
+For the supported `.cpp` translation units in the loaded codemodel, exactly one trusted dependency mapping is required before subset output. Missing evidence or duplicate translation-unit evidence widens to the full known suite.
 
-### Freshness
+### Implemented freshness audit
 
-The current implementation does not yet claim that supplied metadata is fresh merely because it exists. Detectable stale-evidence handling remains a release-hardening requirement; final documentation must not claim absolute freshness or soundness for stale/adversarial metadata.
+For each listed `.d` file, diff2test:
+
+1. reads the dependency file's modification timestamp;
+2. normalizes every prerequisite;
+3. for prerequisites inside `--project-root`, reads the prerequisite modification timestamp;
+4. rejects the dependency evidence if a project prerequisite is newer than the `.d` file;
+5. also rejects subset output when a required project-prerequisite timestamp cannot be inspected.
+
+Such failures become `FULL_SUITE_SELECTED` when the CTest catalogue is readable.
+
+This is a **detectable-staleness check**, not proof of absolute freshness. It does not cryptographically bind metadata to source contents and does not claim that equal/older timestamps guarantee perfect correspondence. Users should generate the metadata as part of the same normal build workflow immediately before diff2test analysis.
+
+External/system prerequisites may appear in `.d` data and are accepted as evidence input, but the current timestamp audit is intentionally applied to project-root prerequisites used by the project impact model.
 
 ## 5. CTest JSON
 
@@ -137,59 +162,81 @@ The current implementation does not yet claim that supplied metadata is fresh me
 ctest --show-only=json-v1 > build/ctest-info.json
 ```
 
-This command belongs to the user's external workflow; diff2test never runs it.
+CTest is external input-generation tooling; diff2test never invokes it or executes tests.
 
 ### Required data
 
 - top-level `kind` equals `ctestInfo`;
 - `version.major` equals `1`;
 - `tests` is an array;
-- each test has a non-empty unique name and non-empty string command array.
+- each test has a non-empty unique name;
+- each test has a non-empty string command array.
+
+If the catalogue itself cannot be trusted or enumerated, the outcome is `FULL_SUITE_REQUIRED` and no test names are invented.
 
 ### Mapping normalization
 
-The first command token must resolve to exactly one CMake executable artifact after build-root resolution and lexical normalization. Basename-only matches are prohibited.
+The first CTest command token must resolve to exactly one CMake executable artifact after build-root resolution and lexical normalization. Basename-only matching is forbidden.
 
-Wrapper/interpreter commands, zero matches, and ambiguous matches cause full-known-suite fallback in the MVP.
+Wrapper/interpreter commands, zero matches, and ambiguous artifact matches prevent subset output and cause full-known-suite fallback.
 
 ## 6. Project and build roots
 
 - `--project-root` and `--build-root` must exist and be directories;
-- normalized declared roots must match codemodel source/build roots;
-- referenced metadata files must remain within their declared containers;
-- dependency prerequisites may include external/system headers, but changed-path analysis concerns project paths;
-- path traversal/root escape is rejected.
+- normalized declared roots must match the codemodel source/build roots;
+- referenced File API metadata must stay within its declared reply container;
+- dependency prerequisites may include external/system paths as evidence;
+- changed-path analysis requires supported project paths;
+- unsafe path traversal/root escape is rejected.
 
-## 7. Initial input limits
+## 7. Input limits
 
-- JSON file: 64 MiB each
+Current configured limits include:
+
+- JSON file: 64 MiB
 - JSON nesting: 256
 - JSON string: 16 MiB
-- dependency file: 16 MiB each
+- dependency file: 16 MiB
 - dependency-list file: 4 MiB
-- changed paths: bounded by available memory for the MVP; final README will document the tested practical boundary
 
-Exceeding a configured limit is a safe analysis failure, not a crash.
+Exceeding a configured limit is a safe analysis failure rather than a crash or partial trusted parse.
 
 ## 8. Version policy
 
 - support known major versions only;
-- accept compatible unknown minor fields only when required structure remains valid;
+- tolerate unknown compatible minor/extra fields only when required structure remains valid;
 - reject/fallback on unsupported major versions;
-- never silently reinterpret an unknown major format.
+- never silently reinterpret a different major format.
 
 ## 9. Malformed and absent input matrix
 
-| Input | Missing/malformed | Safety result |
-|---|---|---|
-| changed paths | invalid/empty invocation | no subset / usage error |
-| CMake reply/codemodel | catalogue known | `FULL_SUITE_SELECTED` |
-| required `.d` evidence | catalogue known | `FULL_SUITE_SELECTED` |
-| unknown changed project path | catalogue known | `FULL_SUITE_SELECTED` |
-| CTest JSON | unavailable/untrusted | `FULL_SUITE_REQUIRED` |
-| root/configuration ambiguity | catalogue known | `FULL_SUITE_SELECTED` |
+| Input/condition | Safety result |
+|---|---|
+| changed paths missing/unreadable/empty | usage error / no subset |
+| CTest catalogue missing or untrusted | `FULL_SUITE_REQUIRED` |
+| CMake reply/codemodel missing, malformed, ambiguous, or root-mismatched | `FULL_SUITE_SELECTED` when catalogue known |
+| dependency list or required `.d` missing/malformed | `FULL_SUITE_SELECTED` when catalogue known |
+| dependency target or translation-unit mapping ambiguous | `FULL_SUITE_SELECTED` |
+| duplicate dependency evidence | `FULL_SUITE_SELECTED` |
+| project prerequisite newer than `.d` | `FULL_SUITE_SELECTED` |
+| project prerequisite timestamp cannot be inspected | `FULL_SUITE_SELECTED` |
+| unknown changed project path | `FULL_SUITE_SELECTED` |
+| changed `CMakeLists.txt` / `.cmake` | `FULL_SUITE_SELECTED` |
+| wrapper/unmapped CTest command | `FULL_SUITE_SELECTED` |
 
-## 10. Future inputs not in MVP
+## 10. Verified controlled environment
+
+The public CI exercises the real controlled fixture on Linux with CMake and the runner's GCC-compatible toolchain. It externally generates:
+
+- File API codemodel replies;
+- compiler `.o.d` files;
+- CTest `json-v1` catalogue.
+
+CI then verifies that changing `include/alpha.hpp` selects exactly `AlphaTest`, and that removing required dependency evidence widens to `AlphaTest`, `BetaTest`, and `CoreTest` with exit status 10.
+
+That test validates the documented controlled environment only; it does not broaden the generator/platform support claim.
+
+## 11. Future inputs not in MVP
 
 - recursive `--dep-root` discovery without a proven generator-specific policy
 - `compile_commands.json`
