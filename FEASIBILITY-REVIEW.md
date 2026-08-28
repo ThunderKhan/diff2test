@@ -4,7 +4,7 @@
 
 **Green with a tightly controlled MVP.**
 
-The confirmed rules allow TestImpact++ to analyze pre-generated metadata without launching the tools that produced it. Official formats expose enough information to construct a useful evidence pipeline for common CMake/CTest projects. The central difficulty is not parsing alone; it is proving that a CTest command maps to a build target and proving that dependency evidence is complete. The conservative fallback contract contains these risks.
+The confirmed rules allow diff2test to analyze pre-generated metadata without launching the tools that produced it. Official formats expose enough information to construct a useful evidence pipeline for common CMake/CTest projects. The central difficulty is not parsing alone; it is proving that a CTest command maps to a build target and proving that dependency evidence is complete. The conservative fallback contract contains these risks.
 
 The project becomes Yellow or Red if scope expands to arbitrary CMake interpretation, every compiler/platform, test wrappers, generated-source chains, or history-based prediction.
 
@@ -53,7 +53,7 @@ GCC-compatible `-MD`/`-MMD` output records Make-style prerequisites discovered d
 
 ### CTest JSON
 
-`ctest --show-only=json-v1` emits structured test information without running tests. TestImpact++ may consume a file created earlier by that command. The JSON includes test names and commands, but a command can invoke a wrapper, interpreter, launcher, or script rather than a target artifact. Only exact, normalized artifact matches are safe in the MVP.
+`ctest --show-only=json-v1` emits structured test information without running tests. diff2test may consume a file created earlier by that command. The JSON includes test names and commands, but a command can invoke a wrapper, interpreter, launcher, or script rather than a target artifact. Only exact, normalized artifact matches are safe in the MVP.
 
 ## CMake-target-to-CTest mapping
 
@@ -178,4 +178,3 @@ No parser can prove that supplied metadata corresponds to the current source tre
 ## Recommendation
 
 Proceed. Freeze the MVP around a controlled Linux/GCC-or-Clang/CMake/CTest workflow and exact artifact mapping. Treat every unsupported feature as a reason to widen selection, not a reason to improvise an inference.
-
