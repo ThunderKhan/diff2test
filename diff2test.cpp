@@ -1,14 +1,13 @@
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
 #include <iostream>
-#include <limits>
 #include <map>
 #include <optional>
 #include <set>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -457,9 +456,7 @@ private:
             if (!value.has_value()) return std::nullopt;
             auto [it, inserted] = object.emplace(std::move(*key), std::move(*value));
             (void)it;
-            if (!inserted) {
-                return set_error("JSON_DUPLICATE_KEY", "duplicate object member is not accepted");
-            }
+            if (!inserted) return set_error("JSON_DUPLICATE_KEY", "duplicate object member is not accepted");
             skip_ws();
             if (at_end()) return set_error("JSON_UNTERMINATED_OBJECT", "unterminated JSON object");
             if (peek() == '}') {
@@ -488,6 +485,189 @@ const Value* find_member(const Value& value, std::string_view key) {
 }
 
 }  // namespace d2t::json
+
+namespace d2t::dep {
+
+struct Rule {
+    std::vector<std::string> targets;
+    std::vector<std::string> prerequisites;
+};
+
+struct Error {
+    std::size_t line = 1;
+    std::size_t column = 1;
+    std::string code;
+    std::string message;
+};
+
+struct ParseResult {
+    std::vector<Rule> rules;
+    std::optional<Error> error;
+
+    bool ok() const { return !error.has_value(); }
+};
+
+namespace detail {
+
+struct LogicalLine {
+    std::string text;
+    std::size_t source_line = 1;
+};
+
+std::optional<std::vector<LogicalLine>> fold_lines(std::string_view input, Error& error) {
+    std::vector<LogicalLine> lines;
+    std::string current;
+    std::size_t logical_start = 1;
+    std::size_t line = 1;
+    std::size_t i = 0;
+
+    while (i < input.size()) {
+        const char c = input[i];
+        if (c == '\0') {
+            error = Error{line, 1, "DEP_NUL", "dependency input contains NUL"};
+            return std::nullopt;
+        }
+        if (c == '\\') {
+            if (i + 1U < input.size() && input[i + 1U] == '\n') {
+                current.push_back(' ');
+                i += 2U;
+                ++line;
+                continue;
+            }
+            if (i + 2U < input.size() && input[i + 1U] == '\r' && input[i + 2U] == '\n') {
+                current.push_back(' ');
+                i += 3U;
+                ++line;
+                continue;
+            }
+        }
+        if (c == '\r' && i + 1U < input.size() && input[i + 1U] == '\n') {
+            lines.push_back(LogicalLine{std::move(current), logical_start});
+            current.clear();
+            i += 2U;
+            ++line;
+            logical_start = line;
+            continue;
+        }
+        if (c == '\n') {
+            lines.push_back(LogicalLine{std::move(current), logical_start});
+            current.clear();
+            ++i;
+            ++line;
+            logical_start = line;
+            continue;
+        }
+        current.push_back(c);
+        ++i;
+    }
+
+    if (!current.empty()) lines.push_back(LogicalLine{std::move(current), logical_start});
+    return lines;
+}
+
+std::optional<std::size_t> find_rule_colon(std::string_view line) {
+    bool escaped = false;
+    for (std::size_t i = 0; i < line.size(); ++i) {
+        const char c = line[i];
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (c == '\\') {
+            escaped = true;
+            continue;
+        }
+        if (c == '#') return std::nullopt;
+        if (c == ':') return i;
+    }
+    return std::nullopt;
+}
+
+std::optional<std::vector<std::string>> tokenize(std::string_view text, std::size_t source_line, Error& error) {
+    std::vector<std::string> tokens;
+    std::string token;
+    bool escaped = false;
+
+    auto flush = [&]() {
+        if (!token.empty()) {
+            tokens.push_back(std::move(token));
+            token.clear();
+        }
+    };
+
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        const char c = text[i];
+        if (escaped) {
+            token.push_back(c);
+            escaped = false;
+            continue;
+        }
+        if (c == '\\') {
+            escaped = true;
+            continue;
+        }
+        if (c == '#') break;
+        if (c == ' ' || c == '\t') {
+            flush();
+            continue;
+        }
+        token.push_back(c);
+    }
+
+    if (escaped) {
+        error = Error{source_line, text.size() + 1U, "DEP_TRAILING_ESCAPE", "dependency rule ends with an escape"};
+        return std::nullopt;
+    }
+    flush();
+    return tokens;
+}
+
+}  // namespace detail
+
+ParseResult parse(std::string_view input) {
+    ParseResult result;
+    Error error;
+    auto lines = detail::fold_lines(input, error);
+    if (!lines.has_value()) {
+        result.error = std::move(error);
+        return result;
+    }
+
+    for (const auto& logical : *lines) {
+        const auto first_non_space = logical.text.find_first_not_of(" \t");
+        if (first_non_space == std::string::npos || logical.text[first_non_space] == '#') continue;
+
+        const auto colon = detail::find_rule_colon(logical.text);
+        if (!colon.has_value()) {
+            result.error = Error{logical.source_line, 1, "DEP_MISSING_COLON", "dependency rule has no unescaped ':' separator"};
+            return result;
+        }
+
+        auto targets = detail::tokenize(std::string_view(logical.text).substr(0, *colon), logical.source_line, error);
+        if (!targets.has_value()) {
+            result.error = std::move(error);
+            return result;
+        }
+        if (targets->empty()) {
+            result.error = Error{logical.source_line, *colon + 1U, "DEP_EMPTY_TARGET", "dependency rule has no target"};
+            return result;
+        }
+
+        auto prerequisites = detail::tokenize(std::string_view(logical.text).substr(*colon + 1U), logical.source_line, error);
+        if (!prerequisites.has_value()) {
+            result.error = std::move(error);
+            return result;
+        }
+
+        std::sort(prerequisites->begin(), prerequisites->end());
+        prerequisites->erase(std::unique(prerequisites->begin(), prerequisites->end()), prerequisites->end());
+        result.rules.push_back(Rule{std::move(*targets), std::move(*prerequisites)});
+    }
+
+    return result;
+}
+
+}  // namespace d2t::dep
 
 namespace d2t::cli {
 
