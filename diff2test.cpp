@@ -2,14 +2,15 @@
 #include <charconv>
 #include <cmath>
 #include <cctype>
-#include <cstdlib>
 #include <cstdint>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
 #include <optional>
+#include <queue>
 #include <set>
 #include <sstream>
 #include <string>
@@ -46,14 +47,13 @@ struct Value {
 };
 struct ParseOptions { std::size_t max_bytes=64U*1024U*1024U,max_nesting=256U,max_string_bytes=16U*1024U*1024U; };
 struct ParseResult { std::optional<Value> value; std::optional<Error> error; bool ok()const{return value.has_value();} };
-
 namespace detail {
 bool cont(unsigned char c){return (c&0xC0U)==0x80U;}
 bool valid_utf8(std::string_view s){
     for(std::size_t i=0;i<s.size();){
         unsigned char c=static_cast<unsigned char>(s[i]); if(c<=0x7F){++i;continue;}
         std::size_t n=0; std::uint32_t cp=0;
-        if((c&0xE0U)==0xC0U){ if(c<0xC2U)return false;n=2;cp=c&0x1FU;}
+        if((c&0xE0U)==0xC0U){if(c<0xC2U)return false;n=2;cp=c&0x1FU;}
         else if((c&0xF0U)==0xE0U){n=3;cp=c&0x0FU;}
         else if((c&0xF8U)==0xF0U){if(c>0xF4U)return false;n=4;cp=c&0x07U;}
         else return false;
@@ -70,7 +70,6 @@ void append_utf8(std::string& out,std::uint32_t cp){
     else {out.push_back(static_cast<char>(0xF0U|(cp>>18U)));out.push_back(static_cast<char>(0x80U|((cp>>12U)&0x3FU)));out.push_back(static_cast<char>(0x80U|((cp>>6U)&0x3FU)));out.push_back(static_cast<char>(0x80U|(cp&0x3FU)));}
 }
 int hex(char c){if(c>='0'&&c<='9')return c-'0';if(c>='a'&&c<='f')return c-'a'+10;if(c>='A'&&c<='F')return c-'A'+10;return -1;}
-
 class Parser{
     std::string_view in; ParseOptions opt; Position pos{}; std::optional<Error> err;
     bool end()const{return pos.offset>=in.size();} char peek()const{return end()?'\0':in[pos.offset];}
@@ -80,13 +79,13 @@ class Parser{
     bool literal(std::string_view x){for(char c:x){if(end()||peek()!=c)return false;adv();}return true;}
     std::optional<std::uint16_t> hex4(){if(in.size()-pos.offset<4){failv("JSON_INVALID_UNICODE_ESCAPE","incomplete unicode escape");return std::nullopt;}std::uint16_t v=0;for(int i=0;i<4;++i){int d=hex(peek());if(d<0){failv("JSON_INVALID_UNICODE_ESCAPE","invalid unicode escape");return std::nullopt;}adv();v=static_cast<std::uint16_t>((v<<4U)|static_cast<unsigned>(d));}return v;}
     std::optional<std::string> str(){
-        adv(); std::string out;
+        adv();std::string out;
         while(!end()){
             unsigned char c=static_cast<unsigned char>(peek());
             if(c=='"'){adv();return out;}
             if(c<0x20U){failv("JSON_CONTROL_IN_STRING","control character in string");return std::nullopt;}
             if(c!='\\'){out.push_back(adv());if(out.size()>opt.max_string_bytes){failv("JSON_STRING_TOO_LARGE","string limit");return std::nullopt;}continue;}
-            adv(); if(end()){failv("JSON_UNTERMINATED_STRING","unterminated string");return std::nullopt;}
+            adv();if(end()){failv("JSON_UNTERMINATED_STRING","unterminated string");return std::nullopt;}
             char e=adv();
             switch(e){
                 case '"':out.push_back('"');break;case '\\':out.push_back('\\');break;case '/':out.push_back('/');break;
@@ -114,49 +113,40 @@ class Parser{
         else return failv("JSON_INVALID_NUMBER","bad number");
         if(!end()&&peek()=='.'){adv();if(end()||!std::isdigit(static_cast<unsigned char>(peek())))return failv("JSON_INVALID_NUMBER","bad fraction");while(!end()&&std::isdigit(static_cast<unsigned char>(peek())))adv();}
         if(!end()&&(peek()=='e'||peek()=='E')){adv();if(!end()&&(peek()=='+'||peek()=='-'))adv();if(end()||!std::isdigit(static_cast<unsigned char>(peek())))return failv("JSON_INVALID_NUMBER","bad exponent");while(!end()&&std::isdigit(static_cast<unsigned char>(peek())))adv();}
-        double v=0; auto s=in.substr(start,pos.offset-start); std::string tmp(s);
-        char* ep=nullptr; v=std::strtod(tmp.c_str(),&ep); if(ep!=tmp.c_str()+tmp.size()||!std::isfinite(v))return failv("JSON_INVALID_NUMBER","number out of range");
-        return Value{v};
+        std::string tmp(in.substr(start,pos.offset-start));char* ep=nullptr;double v=std::strtod(tmp.c_str(),&ep);if(ep!=tmp.c_str()+tmp.size()||!std::isfinite(v))return failv("JSON_INVALID_NUMBER","number out of range");return Value{v};
     }
     std::optional<Value> arr(std::size_t depth){
-        if(depth>opt.max_nesting) return failv("JSON_NESTING_LIMIT","nesting limit");
+        if(depth>opt.max_nesting)return failv("JSON_NESTING_LIMIT","nesting limit");
         adv();ws();Array a;if(!end()&&peek()==']'){adv();return Value{std::move(a)};}
         while(true){auto v=value(depth);if(!v)return std::nullopt;a.push_back(std::move(*v));ws();if(end())return failv("JSON_EXPECTED_COMMA","unterminated array");if(peek()==']'){adv();break;}if(peek()!=',')return failv("JSON_EXPECTED_COMMA","expected comma");adv();ws();if(!end()&&peek()==']')return failv("JSON_TRAILING_COMMA","trailing comma");}
         return Value{std::move(a)};
     }
     std::optional<Value> obj(std::size_t depth){
-        if(depth>opt.max_nesting) return failv("JSON_NESTING_LIMIT","nesting limit");
+        if(depth>opt.max_nesting)return failv("JSON_NESTING_LIMIT","nesting limit");
         adv();ws();Object o;if(!end()&&peek()=='}'){adv();return Value{std::move(o)};}
         while(true){
             if(end()||peek()!='"')return failv("JSON_EXPECTED_KEY","expected key");
-            auto k=str();if(!k)return std::nullopt;ws();if(end()||peek()!=':')return failv("JSON_EXPECTED_COLON","expected colon");adv();ws();
-            auto v=value(depth);if(!v)return std::nullopt;if(o.contains(*k))return failv("JSON_DUPLICATE_KEY","duplicate key");o.emplace(std::move(*k),std::move(*v));ws();
-            if(end()) return failv("JSON_EXPECTED_COMMA","unterminated object");
+            auto k=str();if(!k)return std::nullopt;ws();
+            if(end()||peek()!=':')return failv("JSON_EXPECTED_COLON","expected colon");
+            adv();ws();auto v=value(depth);if(!v)return std::nullopt;
+            if(o.contains(*k))return failv("JSON_DUPLICATE_KEY","duplicate key");
+            o.emplace(std::move(*k),std::move(*v));ws();
+            if(end())return failv("JSON_EXPECTED_COMMA","unterminated object");
             if(peek()=='}'){adv();break;}
-            if(peek()!=',') return failv("JSON_EXPECTED_COMMA","expected comma");
-            adv(); ws();
-            if(!end()&&peek()=='}') return failv("JSON_TRAILING_COMMA","trailing comma");
-        } return Value{std::move(o)};
+            if(peek()!=',')return failv("JSON_EXPECTED_COMMA","expected comma");
+            adv();ws();
+            if(!end()&&peek()=='}')return failv("JSON_TRAILING_COMMA","trailing comma");
+        }return Value{std::move(o)};
     }
     std::optional<Value> value(std::size_t depth){
-        if(depth>opt.max_nesting) return failv("JSON_NESTING_LIMIT","nesting limit");
-        if(end()) return failv("JSON_EXPECTED_VALUE","expected value");
-        if(peek()=='n'){if(!literal("null"))return failv("JSON_INVALID_LITERAL","bad literal");return Value{Null{}};}
-        if(peek()=='t'){if(!literal("true"))return failv("JSON_INVALID_LITERAL","bad literal");return Value{true};}
-        if(peek()=='f'){if(!literal("false"))return failv("JSON_INVALID_LITERAL","bad literal");return Value{false};}
-        if(peek()=='"'){auto x=str();return x?std::optional<Value>{Value{std::move(*x)}}:std::nullopt;}
-        if(peek()=='[') return arr(depth+1);
-        if(peek()=='{') return obj(depth+1);
-        if(peek()=='-'||std::isdigit(static_cast<unsigned char>(peek())))return num();
-        return failv("JSON_EXPECTED_VALUE","expected value");
+        if(depth>opt.max_nesting)return failv("JSON_NESTING_LIMIT","nesting limit");
+        if(end())return failv("JSON_EXPECTED_VALUE","expected value");
+        if(peek()=='n'){if(!literal("null"))return failv("JSON_INVALID_LITERAL","bad literal");return Value{Null{}};}if(peek()=='t'){if(!literal("true"))return failv("JSON_INVALID_LITERAL","bad literal");return Value{true};}if(peek()=='f'){if(!literal("false"))return failv("JSON_INVALID_LITERAL","bad literal");return Value{false};}
+        if(peek()=='"'){auto x=str();return x?std::optional<Value>{Value{std::move(*x)}}:std::nullopt;}if(peek()=='[')return arr(depth+1);if(peek()=='{')return obj(depth+1);if(peek()=='-'||std::isdigit(static_cast<unsigned char>(peek())))return num();return failv("JSON_EXPECTED_VALUE","expected value");
     }
 public:
     Parser(std::string_view s,ParseOptions o):in(s),opt(o){}
-    ParseResult parse(){
-        if(in.size()>opt.max_bytes)return {std::nullopt,Error{pos,"JSON_INPUT_TOO_LARGE","input limit"}};
-        if(!valid_utf8(in))return {std::nullopt,Error{pos,"JSON_INVALID_UTF8","invalid UTF-8"}};
-        ws();auto v=value(0);if(!v)return {std::nullopt,err};ws();if(!end())return {std::nullopt,Error{pos,"JSON_TRAILING_DATA","trailing data"}};return {std::move(v),std::nullopt};
-    }
+    ParseResult parse(){if(in.size()>opt.max_bytes)return {std::nullopt,Error{pos,"JSON_INPUT_TOO_LARGE","input limit"}};if(!valid_utf8(in))return {std::nullopt,Error{pos,"JSON_INVALID_UTF8","invalid UTF-8"}};ws();auto v=value(0);if(!v)return {std::nullopt,err};ws();if(!end())return {std::nullopt,Error{pos,"JSON_TRAILING_DATA","trailing data"}};return {std::move(v),std::nullopt};}
 };
 }
 ParseResult parse(std::string_view input,ParseOptions opt={}){return detail::Parser(input,opt).parse();}
@@ -169,62 +159,60 @@ struct Rule{std::vector<std::string> targets,prerequisites;};
 struct ParseResult{std::vector<Rule> rules;std::optional<Error> error;bool ok()const{return !error.has_value();}};
 ParseResult parse(std::string_view input){
     if(input.find('\0')!=std::string_view::npos)return {{},Error{"DEP_NUL","NUL byte"}};
-    std::string logical; logical.reserve(input.size());
+    std::string logical;logical.reserve(input.size());
     for(std::size_t i=0;i<input.size();++i){
         if(input[i]=='\\'&&i+1<input.size()&&input[i+1]=='\n'){++i;logical.push_back(' ');continue;}
         if(input[i]=='\\'&&i+2<input.size()&&input[i+1]=='\r'&&input[i+2]=='\n'){i+=2;logical.push_back(' ');continue;}
         logical.push_back(input[i]);
     }
     if(!logical.empty()&&logical.back()=='\\')return {{},Error{"DEP_TRAILING_ESCAPE","trailing escape"}};
-    ParseResult out; std::istringstream lines(logical);std::string line;
+    ParseResult out;std::istringstream lines(logical);std::string line;
     while(std::getline(lines,line)){
         if(!line.empty()&&line.back()=='\r')line.pop_back();
         bool esc=false;std::size_t hash=std::string::npos,colon=std::string::npos;
         for(std::size_t i=0;i<line.size();++i){char c=line[i];if(esc){esc=false;continue;}if(c=='\\'){esc=true;continue;}if(c=='#'){hash=i;break;}if(c==':'&&colon==std::string::npos)colon=i;}
         if(hash!=std::string::npos)line.resize(hash);
-        if(line.find_first_not_of(" \t")==std::string::npos)continue;
+        auto only_ws=[](std::string_view x){return std::all_of(x.begin(),x.end(),[](char c){return c==' '||c=='\t';});};
+        if(line.empty()||only_ws(line))continue;
         esc=false;colon=std::string::npos;for(std::size_t i=0;i<line.size();++i){char c=line[i];if(esc){esc=false;continue;}if(c=='\\'){esc=true;continue;}if(c==':'){colon=i;break;}}
-        if(colon==std::string::npos)return {{},Error{"DEP_MISSING_COLON","missing colon"}};
+        if(colon==std::string::npos)return {{},Error{"DEP_MISSING_COLON","missing rule separator"}};
         auto tokens=[](std::string_view s)->std::optional<std::vector<std::string>>{
-            std::vector<std::string> result_tokens; std::string cur; bool e=false;
-            for(char c:s){if(e){cur.push_back(c);e=false;}else if(c=='\\')e=true;else if(c==' '||c=='\t'){if(!cur.empty()){result_tokens.push_back(cur);cur.clear();}}else cur.push_back(c);}
-            if(e) return std::nullopt;
-            if(!cur.empty()) result_tokens.push_back(cur);
-            return result_tokens;
+            std::vector<std::string> v;std::string cur;bool escaped=false;
+            for(char c:s){if(escaped){cur.push_back(c);escaped=false;continue;}if(c=='\\'){escaped=true;continue;}if(c==' '||c=='\t'){if(!cur.empty()){v.push_back(cur);cur.clear();}}else cur.push_back(c);}
+            if(escaped)return std::nullopt;
+            if(!cur.empty())v.push_back(cur);
+            return v;
         };
-        auto ts=tokens(std::string_view(line).substr(0,colon));auto ps=tokens(std::string_view(line).substr(colon+1));
-        if(!ts||!ps) return {{},Error{"DEP_TRAILING_ESCAPE","trailing escape"}};
-        if(ts->empty()) return {{},Error{"DEP_EMPTY_TARGET","empty target"}};
-        std::sort(ps->begin(),ps->end());ps->erase(std::unique(ps->begin(),ps->end()),ps->end());out.rules.push_back({std::move(*ts),std::move(*ps)});
-    } return out;
+        auto t=tokens(std::string_view(line).substr(0,colon));auto p=tokens(std::string_view(line).substr(colon+1));if(!t||!p)return {{},Error{"DEP_TRAILING_ESCAPE","trailing escape"}};if(t->empty())return {{},Error{"DEP_EMPTY_TARGET","empty target"}};
+        std::sort(p->begin(),p->end());p->erase(std::unique(p->begin(),p->end()),p->end());out.rules.push_back({std::move(*t),std::move(*p)});
+    }
+    return out;
 }
 }
 
 namespace d2t::path {
-enum class RootClass{Project,Build,External};
-struct NormalizedPath{std::filesystem::path absolute,display;RootClass root_class;};
-struct Error{std::string code,message;};
-struct Result{std::optional<NormalizedPath> value;std::optional<Error> error;bool ok()const{return value.has_value();}};
-bool under(const std::filesystem::path& p,const std::filesystem::path& root){
-    auto a=p.begin(),b=root.begin();for(;b!=root.end();++a,++b){if(a==p.end()||*a!=*b)return false;}return true;
+enum class RootClass { Project, Build, External };
+struct Normalized { std::filesystem::path absolute,display;RootClass root_class=RootClass::Project; };
+struct Result { std::optional<Normalized> value;std::string error;bool ok()const{return value.has_value();} };
+bool has_prefix(const std::filesystem::path& child,const std::filesystem::path& root){
+    auto c=child.begin(),r=root.begin();for(;r!=root.end();++r,++c){if(c==child.end()||*c!=*r)return false;}return true;
 }
-Result normalize(const std::filesystem::path& input,const std::filesystem::path& project,const std::filesystem::path& build,bool allow_external=false){
-    if(input.empty())return {std::nullopt,Error{"PATH_EMPTY","empty path"}};
-    if(!project.is_absolute()||!build.is_absolute())return {std::nullopt,Error{"PATH_ROOT_NOT_ABSOLUTE","roots must be absolute"}};
-    auto pr=project.lexically_normal(),br=build.lexically_normal();auto abs=(input.is_absolute()?input:pr/input).lexically_normal();
-    if(under(abs,pr))return {NormalizedPath{abs,abs.lexically_relative(pr),RootClass::Project},std::nullopt};
-    if(under(abs,br))return {NormalizedPath{abs,abs.lexically_relative(br),RootClass::Build},std::nullopt};
-    if(allow_external&&abs.is_absolute())return {NormalizedPath{abs,abs,RootClass::External},std::nullopt};
-    return {std::nullopt,Error{"PATH_OUTSIDE_ROOT","path outside allowed roots"}};
+Result normalize(const std::filesystem::path& raw,const std::filesystem::path& project_root,const std::filesystem::path& build_root,bool allow_external=false){
+    if(raw.empty())return {std::nullopt,"empty path"};
+    auto p=project_root.lexically_normal();auto b=build_root.lexically_normal();
+    if(!p.is_absolute()||!b.is_absolute())return {std::nullopt,"roots must be absolute"};
+    std::filesystem::path abs=(raw.is_absolute()?raw:(p/raw)).lexically_normal();
+    if(has_prefix(abs,p))return {Normalized{abs,abs.lexically_relative(p),RootClass::Project},{}};
+    if(has_prefix(abs,b))return {Normalized{abs,abs.lexically_relative(b),RootClass::Build},{}};
+    if(allow_external&&abs.is_absolute())return {Normalized{abs,abs,RootClass::External},{}};
+    return {std::nullopt,"path escapes declared roots"};
 }
 }
 
 namespace d2t::io {
 struct ReadResult{std::optional<std::string> data;std::string error;bool ok()const{return data.has_value();}};
 ReadResult read_text(const std::filesystem::path& p,std::size_t max_bytes=64U*1024U*1024U){
-    std::ifstream f(p,std::ios::binary);if(!f)return {std::nullopt,"cannot open file: "+p.string()};
-    f.seekg(0,std::ios::end);auto n=f.tellg();if(n<0)return {std::nullopt,"cannot size file: "+p.string()};if(static_cast<std::uint64_t>(n)>max_bytes)return {std::nullopt,"file too large: "+p.string()};
-    f.seekg(0);std::string s(static_cast<std::size_t>(n),'\0');if(!s.empty())f.read(s.data(),static_cast<std::streamsize>(s.size()));if(!f&& !s.empty())return {std::nullopt,"cannot read file: "+p.string()};return {std::move(s),{}};
+    std::ifstream f(p,std::ios::binary);if(!f)return {std::nullopt,"cannot open file: "+p.string()};f.seekg(0,std::ios::end);auto n=f.tellg();if(n<0)return {std::nullopt,"cannot size file: "+p.string()};if(static_cast<std::uint64_t>(n)>max_bytes)return {std::nullopt,"file too large: "+p.string()};f.seekg(0);std::string s(static_cast<std::size_t>(n),'\0');if(!s.empty())f.read(s.data(),static_cast<std::streamsize>(s.size()));if(!f&&!s.empty())return {std::nullopt,"cannot read file: "+p.string()};return {std::move(s),{}};
 }
 }
 
@@ -233,175 +221,233 @@ struct RegisteredTest{std::string name;std::vector<std::string> command;};
 struct Catalogue{std::vector<RegisteredTest> tests;};
 struct LoadResult{std::optional<Catalogue> catalogue;std::string error;bool ok()const{return catalogue.has_value();}};
 LoadResult parse_catalogue(std::string_view text){
-    auto parsed=json::parse(text);if(!parsed.ok())return {std::nullopt,"invalid CTest JSON: "+parsed.error->code};
-    const auto& root=*parsed.value;if(!root.is_object())return {std::nullopt,"CTest root must be an object"};
-    auto* kind=json::find_member(root,"kind");auto* version=json::find_member(root,"version");auto* tests=json::find_member(root,"tests");
+    auto parsed=json::parse(text);if(!parsed.ok())return {std::nullopt,"invalid CTest JSON: "+parsed.error->code};const auto& root=*parsed.value;
+    auto kind=json::find_member(root,"kind");auto version=json::find_member(root,"version");auto tests=json::find_member(root,"tests");
     if(!kind||!kind->is_string()||kind->as_string()!="ctestInfo")return {std::nullopt,"CTest kind must be ctestInfo"};
-    if(!version||!version->is_object())return {std::nullopt,"CTest version must be object"};
-    auto* major=json::find_member(*version,"major");if(!major||!major->is_number()||major->as_number()!=1.0)return {std::nullopt,"unsupported CTest major version"};
-    if(!tests||!tests->is_array())return {std::nullopt,"CTest tests must be array"};
-    Catalogue cat;std::set<std::string> names;
-    for(const auto& item:tests->as_array()){
-        if(!item.is_object())return {std::nullopt,"CTest test entry must be object"};
-        auto* name=json::find_member(item,"name");auto* command=json::find_member(item,"command");
-        if(!name||!name->is_string()||name->as_string().empty())return {std::nullopt,"CTest test name must be non-empty string"};
-        if(!names.insert(name->as_string()).second)return {std::nullopt,"duplicate CTest test name"};
-        if(!command||!command->is_array()||command->as_array().empty())return {std::nullopt,"CTest command must be non-empty array"};
-        RegisteredTest t;t.name=name->as_string();
-        for(const auto& arg:command->as_array()){if(!arg.is_string())return {std::nullopt,"CTest command entries must be strings"};t.command.push_back(arg.as_string());}
-        cat.tests.push_back(std::move(t));
+    if(!version||!version->is_object())return {std::nullopt,"CTest version missing"};
+    auto major=json::find_member(*version,"major");
+    if(!major||!major->is_number()||major->as_number()!=1.0)return {std::nullopt,"unsupported CTest major version"};
+    if(!tests||!tests->is_array())return {std::nullopt,"CTest tests missing"};
+    Catalogue out;std::set<std::string> names;
+    for(const auto& tv:tests->as_array()){
+        auto name=json::find_member(tv,"name");auto command=json::find_member(tv,"command");if(!name||!name->is_string()||name->as_string().empty())return {std::nullopt,"invalid CTest test name"};if(!names.insert(name->as_string()).second)return {std::nullopt,"duplicate CTest test name"};if(!command||!command->is_array()||command->as_array().empty())return {std::nullopt,"invalid CTest command"};
+        RegisteredTest t;t.name=name->as_string();for(const auto& x:command->as_array()){if(!x.is_string())return {std::nullopt,"non-string CTest command token"};t.command.push_back(x.as_string());}out.tests.push_back(std::move(t));
     }
-    std::sort(cat.tests.begin(),cat.tests.end(),[](const auto&a,const auto&b){return a.name<b.name;});
-    return {std::move(cat),{}};
+    std::sort(out.tests.begin(),out.tests.end(),[](const auto& a,const auto& b){return a.name<b.name;});return {std::move(out),{}};
 }
-LoadResult load(const std::filesystem::path& p){
-    auto r=io::read_text(p);if(!r.ok())return {std::nullopt,r.error};return parse_catalogue(*r.data);
-}
+LoadResult load(const std::filesystem::path& p){auto r=io::read_text(p);if(!r.ok())return {std::nullopt,r.error};return parse_catalogue(*r.data);}
 }
 
 namespace d2t::cmake {
 struct Target{std::string id,name,type;std::vector<std::filesystem::path> sources,artifacts;std::vector<std::string> dependencies;};
 struct Model{std::filesystem::path source_root,build_root;std::string configuration;std::vector<Target> targets;};
 struct LoadResult{std::optional<Model> model;std::string error;bool ok()const{return model.has_value();}};
-
 std::optional<std::filesystem::path> safe_child(const std::filesystem::path& root,std::string_view rel){
-    std::filesystem::path p(rel);if(p.is_absolute())return std::nullopt;auto full=(root/p).lexically_normal();if(!path::under(full,root.lexically_normal()))return std::nullopt;return full;
+    std::filesystem::path p(rel);if(p.is_absolute())return std::nullopt;auto abs=(root/p).lexically_normal();if(!path::has_prefix(abs,root.lexically_normal()))return std::nullopt;return abs;
 }
-LoadResult load_target(const std::filesystem::path& file,Target& t){
-    auto r=io::read_text(file);if(!r.ok())return {std::nullopt,r.error};auto p=json::parse(*r.data);if(!p.ok()||!p.value->is_object())return {std::nullopt,"invalid target JSON: "+file.string()};
-    auto* id=json::find_member(*p.value,"id");auto* name=json::find_member(*p.value,"name");auto* type=json::find_member(*p.value,"type");
-    if(!id||!id->is_string()||!name||!name->is_string()||!type||!type->is_string())return {std::nullopt,"target missing id/name/type"};
-    t.id=id->as_string();t.name=name->as_string();t.type=type->as_string();
-    if(auto* src=json::find_member(*p.value,"sources");src&&src->is_array())for(const auto& s:src->as_array()){if(!s.is_object())continue;if(auto* x=json::find_member(s,"path");x&&x->is_string())t.sources.emplace_back(x->as_string());}
-    if(auto* arts=json::find_member(*p.value,"artifacts");arts&&arts->is_array())for(const auto& a:arts->as_array()){if(!a.is_object())continue;if(auto* x=json::find_member(a,"path");x&&x->is_string())t.artifacts.emplace_back(x->as_string());}
-    if(auto* deps=json::find_member(*p.value,"dependencies");deps&&deps->is_array())for(const auto& d:deps->as_array()){if(!d.is_object())continue;if(auto* x=json::find_member(d,"id");x&&x->is_string())t.dependencies.push_back(x->as_string());}
-    return {Model{}, {}};
-}
-LoadResult load(const std::filesystem::path& reply_dir,const std::optional<std::filesystem::path>& explicit_index,const std::optional<std::string>& wanted_config){
-    std::filesystem::path index;
-    if(explicit_index){index=*explicit_index;if(!index.is_absolute())index=(reply_dir/index).lexically_normal();}
-    else {
-        std::vector<std::filesystem::path> found;
-        std::error_code ec;for(auto it=std::filesystem::directory_iterator(reply_dir,ec);!ec&&it!=std::filesystem::directory_iterator();++it){auto n=it->path().filename().string();if(n.rfind("index-",0)==0&&it->path().extension()==".json")found.push_back(it->path());}
-        if(ec) return {std::nullopt,"cannot enumerate CMake reply directory"};
-        if(found.size()!=1) return {std::nullopt,"CMake reply index is missing or ambiguous"};
-        index=found.front();
-    }
-    if(!path::under(index.lexically_normal(),reply_dir.lexically_normal()))return {std::nullopt,"CMake index escapes reply directory"};
-    auto ir=io::read_text(index);if(!ir.ok())return {std::nullopt,ir.error};auto ip=json::parse(*ir.data);if(!ip.ok()||!ip.value->is_object())return {std::nullopt,"invalid CMake index JSON"};
-    const json::Value* cm=nullptr;
-    if(auto* reply=json::find_member(*ip.value,"reply");reply&&reply->is_object()){
-        for(const auto& [k,v]:reply->as_object())if(k.rfind("codemodel-v2",0)==0&&v.is_object()){cm=&v;break;}
-    }
-    if(!cm){ if(auto* objs=json::find_member(*ip.value,"objects");objs&&objs->is_array())for(const auto& o:objs->as_array()){if(!o.is_object())continue;auto* kind=json::find_member(o,"kind");if(kind&&kind->is_string()&&kind->as_string()=="codemodel"){cm=&o;break;}}}
-    if(!cm)return {std::nullopt,"CMake index has no codemodel object"};
-    auto* jf=json::find_member(*cm,"jsonFile");auto* ver=json::find_member(*cm,"version");
-    if(!jf||!jf->is_string())return {std::nullopt,"codemodel jsonFile missing"};
-    if(ver&&ver->is_object()){auto* maj=json::find_member(*ver,"major");if(!maj||!maj->is_number()||maj->as_number()!=2.0)return {std::nullopt,"unsupported codemodel major version"};}
-    auto cmfile=safe_child(reply_dir,jf->as_string());if(!cmfile)return {std::nullopt,"codemodel reference escapes reply directory"};
-    auto cr=io::read_text(*cmfile);if(!cr.ok())return {std::nullopt,cr.error};auto cp=json::parse(*cr.data);if(!cp.ok()||!cp.value->is_object())return {std::nullopt,"invalid codemodel JSON"};
-    Model model;
-    auto* paths=json::find_member(*cp.value,"paths");auto* configs=json::find_member(*cp.value,"configurations");
-    if(!paths||!paths->is_object()||!configs||!configs->is_array())return {std::nullopt,"codemodel missing paths/configurations"};
-    auto* source=json::find_member(*paths,"source");auto* build=json::find_member(*paths,"build");
-    if(!source||!source->is_string()||!build||!build->is_string())return {std::nullopt,"codemodel paths invalid"};
-    model.source_root=source->as_string();model.build_root=build->as_string();
-    const json::Value* selected=nullptr;
-    if(wanted_config){
-        for(const auto& c:configs->as_array())if(c.is_object()){auto* n=json::find_member(c,"name");if(n&&n->is_string()&&n->as_string()==*wanted_config){if(selected)return {std::nullopt,"duplicate requested configuration"};selected=&c;}}
-        if(!selected)return {std::nullopt,"requested configuration not found"};
-    }else{
-        if(configs->as_array().size()!=1) return {std::nullopt,"multiple configurations require --configuration"};
-        selected=&configs->as_array().front();
-    }
-    auto* cname=json::find_member(*selected,"name");model.configuration=(cname&&cname->is_string())?cname->as_string():"";
-    auto* targets=json::find_member(*selected,"targets");if(!targets||!targets->is_array())return {std::nullopt,"configuration missing targets"};
+LoadResult load(const std::filesystem::path& reply,std::optional<std::filesystem::path> explicit_index,std::optional<std::string> config){
+    std::vector<std::filesystem::path> indexes;if(explicit_index){indexes.push_back(*explicit_index);}else{std::error_code ec;for(const auto& e:std::filesystem::directory_iterator(reply,ec)){if(ec)break;if(e.is_regular_file()&&e.path().filename().string().rfind("index-",0)==0&&e.path().extension()==".json")indexes.push_back(e.path());}}
+    if(indexes.size()!=1)return {std::nullopt,"CMake reply index is missing or ambiguous"};
+    auto ir=io::read_text(indexes[0]);if(!ir.ok())return {std::nullopt,ir.error};
+    auto ip=json::parse(*ir.data);if(!ip.ok())return {std::nullopt,"invalid CMake index JSON"};
+    auto rep=json::find_member(*ip.value,"reply");if(!rep||!rep->is_object())return {std::nullopt,"CMake reply missing"};auto cm=json::find_member(*rep,"codemodel-v2");if(!cm||!cm->is_object())return {std::nullopt,"codemodel-v2 missing"};auto ver=json::find_member(*cm,"version");auto jf=json::find_member(*cm,"jsonFile");if(!ver||!jf||!jf->is_string())return {std::nullopt,"codemodel reference invalid"};auto maj=json::find_member(*ver,"major");if(!maj||!maj->is_number()||maj->as_number()!=2.0)return {std::nullopt,"unsupported codemodel major"};
+    auto cmfile=safe_child(reply,jf->as_string());if(!cmfile)return {std::nullopt,"codemodel reference escapes reply root"};auto cr=io::read_text(*cmfile);if(!cr.ok())return {std::nullopt,cr.error};auto cp=json::parse(*cr.data);if(!cp.ok())return {std::nullopt,"invalid codemodel JSON"};auto paths=json::find_member(*cp.value,"paths");auto configs=json::find_member(*cp.value,"configurations");if(!paths||!configs||!configs->is_array())return {std::nullopt,"codemodel structure invalid"};auto src=json::find_member(*paths,"source");auto build=json::find_member(*paths,"build");if(!src||!build||!src->is_string()||!build->is_string())return {std::nullopt,"codemodel paths invalid"};
+    const json::Value* chosen=nullptr;for(const auto& c:configs->as_array()){auto n=json::find_member(c,"name");if(!n||!n->is_string())continue;if(config){if(n->as_string()==*config){if(chosen)return {std::nullopt,"duplicate configuration"};chosen=&c;}}else{if(chosen)return {std::nullopt,"multiple configurations require --configuration"};chosen=&c;}}
+    if(!chosen)return {std::nullopt,"configuration not found"};
+    auto targets=json::find_member(*chosen,"targets");
+    if(!targets||!targets->is_array())return {std::nullopt,"configuration targets missing"};
+    Model out;out.source_root=src->as_string();out.build_root=build->as_string();out.configuration=config.value_or("");
     std::set<std::string> ids;
     for(const auto& tr:targets->as_array()){
-        if(!tr.is_object()) return {std::nullopt,"target reference must be object"};
-        auto* tf=json::find_member(tr,"jsonFile");
-        if(!tf||!tf->is_string()) return {std::nullopt,"target reference missing jsonFile"};
-        auto file=safe_child(reply_dir,tf->as_string());if(!file)return {std::nullopt,"target reference escapes reply directory"};Target t;auto lr=load_target(*file,t);if(!lr.ok())return {std::nullopt,lr.error};if(!ids.insert(t.id).second)return {std::nullopt,"duplicate target id"};model.targets.push_back(std::move(t));
+        auto id=json::find_member(tr,"id");auto file=json::find_member(tr,"jsonFile");if(!id||!file||!id->is_string()||!file->is_string())return {std::nullopt,"target reference invalid"};if(!ids.insert(id->as_string()).second)return {std::nullopt,"duplicate target id"};auto tf=safe_child(reply,file->as_string());if(!tf)return {std::nullopt,"target reference escapes reply root"};auto rr=io::read_text(*tf);if(!rr.ok())return {std::nullopt,rr.error};auto tp=json::parse(*rr.data);if(!tp.ok())return {std::nullopt,"invalid target JSON"};auto tid=json::find_member(*tp.value,"id");auto name=json::find_member(*tp.value,"name");auto type=json::find_member(*tp.value,"type");if(!tid||!name||!type||!tid->is_string()||tid->as_string()!=id->as_string()||!name->is_string()||!type->is_string())return {std::nullopt,"target identity invalid"};
+        Target t;t.id=id->as_string();t.name=name->as_string();t.type=type->as_string();
+        if(auto s=json::find_member(*tp.value,"sources")){if(!s->is_array())return {std::nullopt,"target sources invalid"};for(const auto& sv:s->as_array()){auto p=json::find_member(sv,"path");if(!p||!p->is_string())return {std::nullopt,"source path invalid"};if(auto g=json::find_member(sv,"isGenerated");g&&g->is_bool()&&g->as_bool())return {std::nullopt,"generated source unsupported"};t.sources.emplace_back(p->as_string());}}
+        if(auto a=json::find_member(*tp.value,"artifacts")){if(!a->is_array())return {std::nullopt,"target artifacts invalid"};for(const auto& av:a->as_array()){auto p=json::find_member(av,"path");if(!p||!p->is_string())return {std::nullopt,"artifact path invalid"};t.artifacts.emplace_back(p->as_string());}}
+        if(auto d=json::find_member(*tp.value,"dependencies")){if(!d->is_array())return {std::nullopt,"target dependencies invalid"};for(const auto& dv:d->as_array()){auto p=json::find_member(dv,"id");if(!p||!p->is_string())return {std::nullopt,"dependency id invalid"};t.dependencies.push_back(p->as_string());}}
+        out.targets.push_back(std::move(t));
     }
-    std::sort(model.targets.begin(),model.targets.end(),[](const auto&a,const auto&b){return a.id<b.id;});
-    return {std::move(model),{}};
+    std::sort(out.targets.begin(),out.targets.end(),[](const auto& a,const auto& b){return a.id<b.id;});return {std::move(out),{}};
 }
 }
 
 namespace d2t::mapping {
-struct TestMapping{std::string test_name,target_id;std::filesystem::path executable;};
-struct Result{std::vector<TestMapping> mappings;std::vector<std::string> errors;bool complete()const{return errors.empty();}};
+struct TestMapping{std::string test_name,target_id;};
+struct Result{std::vector<TestMapping> mappings;std::vector<std::string> issues;bool complete()const{return issues.empty();}};
 Result map_tests(const ctest::Catalogue& cat,const cmake::Model& model,const std::filesystem::path& build_root){
     std::map<std::filesystem::path,std::vector<std::string>> artifacts;
-    for(const auto& t:model.targets)if(t.type=="EXECUTABLE")for(const auto& a:t.artifacts){auto p=(a.is_absolute()?a:build_root/a).lexically_normal();artifacts[p].push_back(t.id);}
-    Result r;
+    for(const auto& t:model.targets)for(const auto& a:t.artifacts){auto p=(a.is_absolute()?a:(build_root/a)).lexically_normal();artifacts[p].push_back(t.id);}
+    Result out;
     for(const auto& test:cat.tests){
-        std::filesystem::path exe(test.command.front());if(!exe.is_absolute())exe=(build_root/exe).lexically_normal();else exe=exe.lexically_normal();
-        auto it=artifacts.find(exe);if(it==artifacts.end()||it->second.size()!=1){r.errors.push_back("test '"+test.name+"' does not map uniquely to a CMake executable artifact");continue;}
-        r.mappings.push_back({test.name,it->second.front(),exe});
+        std::filesystem::path cmd=test.command.front();auto p=(cmd.is_absolute()?cmd:(build_root/cmd)).lexically_normal();auto it=artifacts.find(p);if(it==artifacts.end()||it->second.size()!=1){out.issues.push_back("test "+test.name+" does not map uniquely to a target artifact");continue;}out.mappings.push_back({test.name,it->second.front()});
     }
-    std::sort(r.mappings.begin(),r.mappings.end(),[](const auto&a,const auto&b){return a.test_name<b.test_name;});return r;
+    std::sort(out.mappings.begin(),out.mappings.end(),[](const auto& a,const auto& b){return a.test_name<b.test_name;});return out;
 }
 }
 
 namespace d2t::cli {
 struct AnalyzeOptions{
-    std::filesystem::path project_root,build_root,cmake_reply,ctest_info,dep_list;
-    std::string changed_files;std::optional<std::filesystem::path> cmake_index;std::optional<std::string> configuration;
-    std::string format="human";bool explain=false,verbose=false;
+    std::filesystem::path project_root,build_root,cmake_reply,ctest_info,dep_list;std::string changed_files;std::optional<std::filesystem::path> cmake_index;std::optional<std::string> configuration;std::string format="human";bool explain=false,verbose=false;
 };
 struct ParseResult{bool ok=false;AnalyzeOptions options;std::string error;};
 void print_help(std::ostream& out){
-    out<<"diff2test - conservative C++ test-impact analysis\n\nUsage:\n  diff2test --help\n  diff2test --version\n  diff2test analyze [options]\n\n"
-       <<"Required analyze options:\n  --project-root <dir>\n  --build-root <dir>\n  --changed-files <file|->\n  --cmake-reply <dir>\n  --ctest-info <file>\n  --dep-list <file>\n\n"
-       <<"Optional:\n  --cmake-index <file>\n  --configuration <name>\n  --format <human|names>\n  --explain\n  --verbose\n\n"
-       <<"diff2test only reads pre-generated metadata. It never launches Git, CMake,\nCTest, a compiler, a shell, or any other external program.\n";
+    out<<"diff2test - conservative C++ test-impact analysis\n\nUsage:\n  diff2test --help\n  diff2test --version\n  diff2test analyze [options]\n\nRequired analyze options:\n  --project-root <dir>\n  --build-root <dir>\n  --changed-files <file|->\n  --cmake-reply <dir>\n  --ctest-info <file>\n  --dep-list <file>\n\nOptional:\n  --cmake-index <file>\n  --configuration <name>\n  --format <human|names>\n  --explain\n  --verbose\n\nCMake, CTest, Git, and the compiler may generate input externally, but diff2test never launches them or any other program at runtime.\n";
 }
 ParseResult parse_analyze(int argc,char** argv){
-    ParseResult r;std::map<std::string,std::string> vals;std::set<std::string> flags;
-    const std::set<std::string> vo={"--project-root","--build-root","--changed-files","--cmake-reply","--cmake-index","--ctest-info","--dep-list","--configuration","--format"};
-    const std::set<std::string> fo={"--explain","--verbose"};
-    for(int i=2;i<argc;++i){std::string a=argv[i];if(vo.contains(a)){if(vals.contains(a))return {false,{}, "repeated option: "+a};if(i+1>=argc)return {false,{},"missing value for option: "+a};vals[a]=argv[++i];}
-        else if(fo.contains(a)){if(!flags.insert(a).second)return {false,{},"repeated option: "+a};}else return {false,{},"unknown option: "+a};}
-    for(auto k:{"--project-root","--build-root","--changed-files","--cmake-reply","--ctest-info","--dep-list"})if(!vals.contains(k))return {false,{},"missing required option: "+std::string(k)};
-    if(vals.contains("--format")&&vals["--format"]!="human"&&vals["--format"]!="names")return {false,{},"--format must be either 'human' or 'names'"};
-    r.options.project_root=vals["--project-root"];r.options.build_root=vals["--build-root"];r.options.changed_files=vals["--changed-files"];r.options.cmake_reply=vals["--cmake-reply"];r.options.ctest_info=vals["--ctest-info"];r.options.dep_list=vals["--dep-list"];
-    if(vals.contains("--cmake-index")) r.options.cmake_index=vals["--cmake-index"];
-    if(vals.contains("--configuration")) r.options.configuration=vals["--configuration"];
-    if(vals.contains("--format")) r.options.format=vals["--format"];
-    r.options.explain=flags.contains("--explain");r.options.verbose=flags.contains("--verbose");r.ok=true;return r;
+    ParseResult r;std::map<std::string,std::string> v;std::set<std::string> f;const std::set<std::string> vo={"--project-root","--build-root","--changed-files","--cmake-reply","--cmake-index","--ctest-info","--dep-list","--configuration","--format"};const std::set<std::string> fo={"--explain","--verbose"};
+    for(int i=2;i<argc;++i){std::string a=argv[i];if(vo.contains(a)){if(v.contains(a)){r.error="repeated option: "+a;return r;}if(i+1>=argc){r.error="missing value for option: "+a;return r;}v.emplace(a,argv[++i]);}else if(fo.contains(a)){if(!f.insert(a).second){r.error="repeated option: "+a;return r;}}else{r.error="unknown option: "+a;return r;}}
+    for(const char* x:{"--project-root","--build-root","--changed-files","--cmake-reply","--ctest-info","--dep-list"})if(!v.contains(x)){r.error=std::string("missing required option: ")+x;return r;}
+    if(v.contains("--format")&&v["--format"]!="human"&&v["--format"]!="names"){r.error="--format must be human or names";return r;}
+    r.options.project_root=v["--project-root"];r.options.build_root=v["--build-root"];r.options.changed_files=v["--changed-files"];r.options.cmake_reply=v["--cmake-reply"];r.options.ctest_info=v["--ctest-info"];r.options.dep_list=v["--dep-list"];if(v.contains("--cmake-index"))r.options.cmake_index=v["--cmake-index"];if(v.contains("--configuration"))r.options.configuration=v["--configuration"];if(v.contains("--format"))r.options.format=v["--format"];r.options.explain=f.contains("--explain");r.options.verbose=f.contains("--verbose");r.ok=true;return r;
 }
 }
 
+namespace d2t::analysis {
+struct TranslationUnitKey{
+    std::string target_id;
+    std::filesystem::path source;
+    bool operator<(const TranslationUnitKey& other) const {
+        if(target_id!=other.target_id)return target_id<other.target_id;
+        return source.generic_string()<other.source.generic_string();
+    }
+};
+struct DependencyEvidence{
+    std::map<std::filesystem::path,std::set<TranslationUnitKey>> prerequisite_to_units;
+    std::set<TranslationUnitKey> covered_units;
+};
+struct Result{
+    core::Outcome outcome=core::Outcome::InternalError;
+    std::vector<std::string> selected_tests;
+    std::vector<std::string> reasons;
+    std::map<std::string,std::vector<std::string>> explanations;
+};
+std::optional<std::vector<std::string>> read_lines(const std::string& source,std::string& error){
+    std::vector<std::string> lines;std::istream* in=nullptr;std::ifstream file;
+    if(source=="-")in=&std::cin;else{file.open(source);if(!file){error="cannot open line input: "+source;return std::nullopt;}in=&file;}
+    std::string s;while(std::getline(*in,s)){if(!s.empty()&&s.back()=='\r')s.pop_back();if(s.find('\0')!=std::string::npos){error="NUL in line input";return std::nullopt;}if(!s.empty())lines.push_back(s);}
+    if(!*in && !in->eof()){error="failed while reading line input";return std::nullopt;}
+    return lines;
+}
+std::optional<DependencyEvidence> load_dependencies(
+    const std::filesystem::path& list_file,
+    const cmake::Model& model,
+    const std::filesystem::path& project_root,
+    const std::filesystem::path& build_root,
+    std::string& error){
+    std::map<std::filesystem::path,std::set<std::string>> source_owners;
+    std::map<std::string,std::string> target_name_to_id;
+    for(const auto& t:model.targets){
+        if(target_name_to_id.contains(t.name)&&target_name_to_id[t.name]!=t.id){error="duplicate CMake target name is unsupported: "+t.name;return std::nullopt;}
+        target_name_to_id[t.name]=t.id;
+        for(const auto& source:t.sources){
+            auto sp=path::normalize(source,project_root,build_root,false);
+            if(!sp.ok()){error="unsafe codemodel source: "+source.string();return std::nullopt;}
+            if(sp.value->root_class==path::RootClass::Project&&sp.value->absolute.extension()==".cpp")source_owners[sp.value->absolute].insert(t.id);
+        }
+    }
+    auto lr=io::read_text(list_file,4U*1024U*1024U);if(!lr.ok()){error=lr.error;return std::nullopt;}
+    std::istringstream in(*lr.data);std::string line;DependencyEvidence ev;std::set<std::filesystem::path> listed;
+    while(std::getline(in,line)){
+        if(!line.empty()&&line.back()=='\r')line.pop_back();
+        if(line.empty())continue;
+        std::filesystem::path dp=line;if(!dp.is_absolute())dp=(build_root/dp).lexically_normal();
+        if(!listed.insert(dp).second){error="duplicate dependency file in --dep-list: "+dp.string();return std::nullopt;}
+        auto dr=io::read_text(dp,16U*1024U*1024U);if(!dr.ok()){error=dr.error;return std::nullopt;}
+        auto parsed=dep::parse(*dr.data);if(!parsed.ok()){error="invalid dependency file "+dp.string()+": "+parsed.error->code;return std::nullopt;}
+        if(parsed.rules.size()!=1){error="dependency file must contain exactly one compiler rule: "+dp.string();return std::nullopt;}
+        const auto& rule=parsed.rules.front();
+        std::set<std::string> rule_targets;
+        for(const auto& token:rule.targets){
+            std::string g=std::filesystem::path(token).generic_string();
+            for(const auto& [name,id]:target_name_to_id){
+                std::string marker="CMakeFiles/"+name+".dir/";
+                if(g.find(marker)!=std::string::npos)rule_targets.insert(id);
+            }
+        }
+        if(rule_targets.size()!=1){error="dependency rule target does not map uniquely to a CMake target: "+dp.string();return std::nullopt;}
+        const std::string target_id=*rule_targets.begin();
+        std::set<std::filesystem::path> source_candidates;
+        std::vector<std::filesystem::path> project_prereqs;
+        for(const auto& prereq:rule.prerequisites){
+            auto np=path::normalize(prereq,project_root,build_root,true);if(!np.ok()){error="unsafe dependency prerequisite: "+prereq;return std::nullopt;}
+            if(np.value->root_class==path::RootClass::Project){
+                project_prereqs.push_back(np.value->absolute);
+                auto it=source_owners.find(np.value->absolute);
+                if(it!=source_owners.end()&&it->second.contains(target_id))source_candidates.insert(np.value->absolute);
+            }
+        }
+        if(source_candidates.size()!=1){error="dependency rule does not identify exactly one compiled source for its target: "+dp.string();return std::nullopt;}
+        TranslationUnitKey unit{target_id,*source_candidates.begin()};
+        if(!ev.covered_units.insert(unit).second){error="duplicate dependency evidence for translation unit: "+unit.source.string();return std::nullopt;}
+        for(const auto& prereq:project_prereqs)ev.prerequisite_to_units[prereq].insert(unit);
+    }
+    for(const auto& [source,owners]:source_owners)for(const auto& target_id:owners){
+        TranslationUnitKey key{target_id,source};
+        if(!ev.covered_units.contains(key)){error="missing dependency evidence for source "+source.lexically_relative(project_root).string()+" in target "+target_id;return std::nullopt;}
+    }
+    return ev;
+}
+Result analyze(const cli::AnalyzeOptions& opt){
+    Result out;
+    auto cat=ctest::load(opt.ctest_info);
+    if(!cat.ok()){out.outcome=core::Outcome::FullSuiteRequired;out.reasons.push_back(cat.error);return out;}
+    auto all_names=[&](){std::vector<std::string> v;for(const auto& t:cat.catalogue->tests)v.push_back(t.name);return v;};
+    auto full=[&](std::string reason){out.outcome=core::Outcome::FullSuiteSelected;out.selected_tests=all_names();out.reasons.push_back(std::move(reason));return out;};
+    if(!std::filesystem::is_directory(opt.project_root)||!std::filesystem::is_directory(opt.build_root))return full("project/build root must exist and be directories");
+    auto model=cmake::load(opt.cmake_reply,opt.cmake_index,opt.configuration);if(!model.ok())return full(model.error);
+    auto declared_project=std::filesystem::absolute(opt.project_root).lexically_normal();
+    auto declared_build=std::filesystem::absolute(opt.build_root).lexically_normal();
+    if(std::filesystem::absolute(model.model->source_root).lexically_normal()!=declared_project||std::filesystem::absolute(model.model->build_root).lexically_normal()!=declared_build)return full("declared roots do not match codemodel paths");
+    auto mapped=mapping::map_tests(*cat.catalogue,*model.model,declared_build);
+    if(!mapped.complete()){out.outcome=core::Outcome::FullSuiteSelected;out.selected_tests=all_names();out.reasons=mapped.issues;return out;}
+    std::string err;auto deps=load_dependencies(opt.dep_list,*model.model,declared_project,declared_build,err);if(!deps)return full(err);
+    auto changed=read_lines(opt.changed_files,err);if(!changed||changed->empty()){out.outcome=core::Outcome::UsageError;out.reasons.push_back(changed?"changed path list is empty":err);return out;}
+    std::set<TranslationUnitKey> affected_units;
+    for(const auto& raw:*changed){
+        auto np=path::normalize(raw,declared_project,declared_build,false);
+        if(!np.ok()||np.value->root_class!=path::RootClass::Project)return full("unknown or unsafe changed path: "+raw);
+        const auto abs=np.value->absolute;
+        if(abs.filename()=="CMakeLists.txt"||abs.extension()==".cmake")return full("build configuration changed: "+raw);
+        auto it=deps->prerequisite_to_units.find(abs);
+        if(it==deps->prerequisite_to_units.end())return full("unknown changed path: "+raw);
+        affected_units.insert(it->second.begin(),it->second.end());
+    }
+    std::set<std::string> affected_targets;for(const auto& u:affected_units)affected_targets.insert(u.target_id);
+    std::map<std::string,std::set<std::string>> reverse;std::set<std::string> ids;for(const auto& t:model.model->targets)ids.insert(t.id);
+    for(const auto& t:model.model->targets)for(const auto& d:t.dependencies){
+        if(!ids.contains(d))return full("target dependency references unknown target: "+d);
+        reverse[d].insert(t.id);
+    }
+    std::queue<std::string> q;for(const auto& id:affected_targets)q.push(id);
+    while(!q.empty()){auto cur=q.front();q.pop();for(const auto& next:reverse[cur])if(affected_targets.insert(next).second)q.push(next);}
+    std::map<std::string,std::string> test_to_target;for(const auto& m:mapped.mappings)test_to_target[m.test_name]=m.target_id;
+    for(const auto& t:cat.catalogue->tests)if(affected_targets.contains(test_to_target[t.name]))out.selected_tests.push_back(t.name);
+    std::sort(out.selected_tests.begin(),out.selected_tests.end());
+    out.outcome=core::Outcome::SubsetSelected;
+    for(const auto& name:out.selected_tests){
+        out.explanations[name]={"changed path -> compiler dependency evidence","dependency evidence -> affected translation unit","translation unit -> affected target "+test_to_target[name],"target artifact -> registered test "+name};
+    }
+    return out;
+}
+}
 namespace d2t {
+void emit(const analysis::Result& r,const cli::AnalyzeOptions& opt){
+    auto status=[&](){switch(r.outcome){case core::Outcome::SubsetSelected:return "SUBSET_SELECTED";case core::Outcome::FullSuiteSelected:return "FULL_SUITE_SELECTED";case core::Outcome::FullSuiteRequired:return "FULL_SUITE_REQUIRED";case core::Outcome::UsageError:return "USAGE_ERROR";case core::Outcome::InputError:return "INPUT_ERROR";case core::Outcome::InternalError:return "INTERNAL_ERROR";}return "INTERNAL_ERROR";};
+    if(opt.format=="human"){std::cout<<"STATUS: "<<status()<<"\n";if(!r.selected_tests.empty()){std::cout<<"\nSelected tests ("<<r.selected_tests.size()<<"):\n";for(const auto& n:r.selected_tests)std::cout<<"  "<<n<<"\n";}if(opt.explain)for(const auto& [name,steps]:r.explanations){std::cout<<"\nReason for "<<name<<":\n";for(const auto& s:steps)std::cout<<"  "<<s<<"\n";}}
+    else for(const auto& n:r.selected_tests)std::cout<<n<<"\n";
+    for(const auto& reason:r.reasons)std::cerr<<"diff2test: "<<status()<<": "<<reason<<"\n";
+}
 int run(int argc,char** argv){
     using core::Outcome;
-    if(argc==2){std::string_view a=argv[1];if(a=="--help"||a=="-h"){cli::print_help(std::cout);return 0;}if(a=="--version"){std::cout<<"diff2test "<<core::kVersion<<'\n';return 0;}}
+    if(argc==2){std::string_view a=argv[1];if(a=="--help"||a=="-h"){cli::print_help(std::cout);return 0;}if(a=="--version"){std::cout<<"diff2test "<<core::kVersion<<"\n";return 0;}}
     if(argc<2||std::string_view(argv[1])!="analyze"){std::cerr<<"diff2test: expected command 'analyze' (try --help)\n";return core::exit_code(Outcome::UsageError);}
-    auto p=cli::parse_analyze(argc,argv);if(!p.ok){std::cerr<<"diff2test: "<<p.error<<'\n';return core::exit_code(Outcome::UsageError);}
-    auto cat=ctest::load(p.options.ctest_info);
-    if(!cat.ok()){std::cout<<"STATUS: FULL_SUITE_REQUIRED\n";std::cerr<<"diff2test: cannot enumerate registered tests: "<<cat.error<<"\n";return core::exit_code(Outcome::FullSuiteRequired);}
-    auto model=cmake::load(p.options.cmake_reply,p.options.cmake_index,p.options.configuration);
-    if(!model.ok()){
-        if(p.options.format=="human")std::cout<<"STATUS: FULL_SUITE_SELECTED\n";
-        for(const auto& t:cat.catalogue->tests)std::cout<<t.name<<'\n';
-        std::cerr<<"diff2test: safety fallback: "<<model.error<<"\n";return core::exit_code(Outcome::FullSuiteSelected);
-    }
-    auto maps=mapping::map_tests(*cat.catalogue,*model.model,p.options.build_root);
-    if(!maps.complete()){
-        if(p.options.format=="human")std::cout<<"STATUS: FULL_SUITE_SELECTED\n";
-        for(const auto& t:cat.catalogue->tests)std::cout<<t.name<<'\n';
-        std::cerr<<"diff2test: safety fallback: "<<maps.errors.front()<<"\n";return core::exit_code(Outcome::FullSuiteSelected);
-    }
-    if(p.options.format=="human")std::cout<<"STATUS: FULL_SUITE_SELECTED\n";
-    for(const auto& t:cat.catalogue->tests)std::cout<<t.name<<'\n';
-    std::cerr<<"diff2test: safety fallback: dependency evidence analysis is not implemented yet\n";
-    return core::exit_code(Outcome::FullSuiteSelected);
+    auto parsed=cli::parse_analyze(argc,argv);if(!parsed.ok){std::cerr<<"diff2test: "<<parsed.error<<"\n";return core::exit_code(Outcome::UsageError);}
+    auto result=analysis::analyze(parsed.options);emit(result,parsed.options);return core::exit_code(result.outcome);
 }
 }
-
 #ifndef D2T_TESTING
 int main(int argc,char** argv){
-    try{return d2t::run(argc,argv);}catch(const std::exception& e){std::cerr<<"diff2test: internal error: "<<e.what()<<'\n';return d2t::core::exit_code(d2t::core::Outcome::InternalError);}catch(...){std::cerr<<"diff2test: internal error: unknown exception\n";return d2t::core::exit_code(d2t::core::Outcome::InternalError);}
+    try{return d2t::run(argc,argv);}
+    catch(const std::exception& ex){std::cerr<<"diff2test: internal error: "<<ex.what()<<"\n";return d2t::core::exit_code(d2t::core::Outcome::InternalError);}
+    catch(...){std::cerr<<"diff2test: internal error: unknown exception\n";return d2t::core::exit_code(d2t::core::Outcome::InternalError);}
 }
 #endif
