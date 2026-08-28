@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(diff2test_fixture LANGUAGES CXX)
 
-include(CTest)
 enable_testing()
 
 add_library(core STATIC src/core.cpp)
