@@ -1,4 +1,4 @@
-# Architecture — TestImpact++
+# Architecture — diff2test
 
 ## 1. Architectural goal
 
@@ -15,32 +15,32 @@ External developer workflow
   ├─ compiler dependency files
   └─ CTest JSON
              ↓ files/stdin only
-       TestImpact++ analyzer
+        diff2test analyzer
              ↓
   selected names + explanations + status
              ↓
 External workflow runs tests separately
 ```
 
-TestImpact++ has no process-control component by design.
+diff2test has no process-control component by design.
 
 ## 3. One-file organization
 
-Recommended top-to-bottom sections inside `testimpact.cpp`:
+Recommended top-to-bottom sections inside `diff2test.cpp`:
 
 1. Standard headers and build metadata constants
-2. `ti::core` — identifiers, status/result types, limits
-3. `ti::diag` — source positions, diagnostics, rendering
-4. `ti::cli` — command/options parsing
-5. `ti::json` — tokenizer, parser, value representation/accessors
-6. `ti::dep` — Make-style dependency parser
-7. `ti::path` — normalization and root checks
-8. `ti::cmake` — File API/codemodel loader
-9. `ti::ctest` — CTest catalogue loader
-10. `ti::model` — graph and evidence records
-11. `ti::impact` — mapping/traversal/explanations
-12. `ti::safety` — completeness ledger and final outcome
-13. `ti::output` — human/names formatters
+2. `d2t::core` — identifiers, status/result types, limits
+3. `d2t::diag` — source positions, diagnostics, rendering
+4. `d2t::cli` — command/options parsing
+5. `d2t::json` — tokenizer, parser, value representation/accessors
+6. `d2t::dep` — Make-style dependency parser
+7. `d2t::path` — normalization and root checks
+8. `d2t::cmake` — File API/codemodel loader
+9. `d2t::ctest` — CTest catalogue loader
+10. `d2t::model` — graph and evidence records
+11. `d2t::impact` — mapping/traversal/explanations
+12. `d2t::safety` — completeness ledger and final outcome
+13. `d2t::output` — human/names formatters
 14. top-level orchestration and `main`
 
 The exact namespace names may change, but the dependency direction must remain downward: parsing layers do not call output or orchestration layers.
@@ -236,7 +236,7 @@ This centralization prevents a forgotten warning from accidentally permitting su
 Options to decide after kickoff:
 
 1. black-box executable tests driven by a standard-library test harness/script allowed as dev-only tooling;
-2. compile `testimpact.cpp` with a macro that excludes `main` and exposes internal test entry points;
+2. compile `diff2test.cpp` with a macro that excludes `main` and exposes internal test entry points;
 3. built-in `self-test` mode, though this enlarges runtime surface and is not preferred.
 
 Preferred approach: a simple separate test executable or shell harness created during the event, with no runtime dependency in the shipped artifact. The organizer allows separate tests.
@@ -253,4 +253,3 @@ Preferred approach: a simple separate test executable or shell harness created d
 - freshness fingerprints
 
 No extension point justifies weakening the current safety contract.
-
