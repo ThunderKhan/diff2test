@@ -2,7 +2,7 @@
 
 ## Claim
 
-TestImpact++ ships with zero third-party runtime dependencies and contains no vendored third-party source. It uses permitted C++/libc/POSIX runtime facilities and never launches separately installed tools.
+diff2test ships with zero third-party runtime dependencies and contains no vendored third-party source. It uses permitted C++/libc/POSIX runtime facilities and never launches separately installed tools.
 
 ## Environment
 
@@ -78,7 +78,7 @@ List inputs produced externally:
 - `.d` files;
 - CTest JSON.
 
-State that they are parsed as untrusted data and absence triggers safe degradation. TestImpact++ does not execute their producers.
+State that they are parsed as untrusted data and absence triggers safe degradation. diff2test does not execute their producers.
 
 ## Reproduction commands
 
@@ -99,4 +99,3 @@ Summarize pass/fail and date. Attach raw output in a separate `deps-proof.txt` i
 - [ ] No service/network requirement
 - [ ] Metadata distinction explained
 - [ ] Commands reproducible by judge
-
