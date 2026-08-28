@@ -1,4 +1,4 @@
-# Test Plan — TestImpact++
+# Test Plan — diff2test
 
 ## 1. Test philosophy
 
@@ -257,4 +257,3 @@ Aim for at least:
 - 5 end-to-end scenarios.
 
 Coverage quantity is secondary to mutation quality. A small test suite that proves conservative behavior is stronger than many trivial assertions.
-
