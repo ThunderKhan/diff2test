@@ -1,21 +1,21 @@
-# CLI Contract — TestImpact++ MVP
+# CLI Contract — diff2test MVP
 
 ## 1. Executable
 
 Canonical artifact name:
 
 ```text
-testimpact
+diff2test
 ```
 
-Product name in prose: **TestImpact++**.
+Product name in prose: **diff2test**.
 
 ## 2. Commands
 
 ```text
-testimpact analyze [options]
-testimpact --help
-testimpact --version
+diff2test analyze [options]
+diff2test --help
+diff2test --version
 ```
 
 Only `analyze` is required for MVP. Unknown commands and options are usage errors.
@@ -23,7 +23,7 @@ Only `analyze` is required for MVP. Unknown commands and options are usage error
 ## 3. Analyze synopsis
 
 ```bash
-testimpact analyze \
+diff2test analyze \
   --project-root <dir> \
   --build-root <dir> \
   --changed-files <file|-> \
@@ -92,7 +92,7 @@ ParserUnitTests
 stderr, when verbose or explanation is requested:
 
 ```text
-testimpact: SUBSET_SELECTED: selected 1 of 3 tests
+diff2test: SUBSET_SELECTED: selected 1 of 3 tests
 ```
 
 ### 6.3 Full-known-suite fallback
@@ -106,7 +106,7 @@ STATUS: FULL_SUITE_SELECTED
 stderr:
 
 ```text
-testimpact: safety fallback: missing dependency evidence for target parser_tests
+diff2test: safety fallback: missing dependency evidence for target parser_tests
 ```
 
 Names stdout still emits every known test, one per line, allowing the caller to run them.
@@ -122,8 +122,8 @@ STATUS: FULL_SUITE_REQUIRED
 stderr:
 
 ```text
-testimpact: cannot enumerate registered tests: CTest metadata is unavailable
-testimpact: run the complete suite using your normal project workflow
+diff2test: cannot enumerate registered tests: CTest metadata is unavailable
+diff2test: run the complete suite using your normal project workflow
 ```
 
 Names mode emits no invented names.
@@ -196,4 +196,3 @@ Usage error examples:
 ## 12. Compatibility policy
 
 CLI names and exit statuses freeze at MVP completion. Before that, changes must update `CLI-CONTRACT.md`, `SAFETY-CONTRACT.md`, tests, README examples, and demo commands together.
-
