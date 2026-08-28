@@ -1,4 +1,4 @@
-# Input Specification — TestImpact++ MVP
+# Input Specification — diff2test MVP
 
 ## 1. General rules
 
@@ -150,13 +150,13 @@ If the dependency file is older than a source/prerequisite under a chosen timest
 
 ### Source
 
-`--ctest-info <path>` identifies a file previously produced outside TestImpact++ by:
+`--ctest-info <path>` identifies a file previously produced outside diff2test by:
 
 ```bash
 ctest --show-only=json-v1 > build/ctest-info.json
 ```
 
-This command is documentation for the user's workflow; TestImpact++ never runs it.
+This command is documentation for the user's workflow; diff2test never runs it.
 
 ### Required top-level data
 
@@ -234,4 +234,3 @@ Exceeding a limit is a safe analysis failure, not a crash.
 - manual target/test manifest
 - CMake trace output
 - test history
-
