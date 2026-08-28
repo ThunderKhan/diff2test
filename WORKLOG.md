@@ -33,42 +33,73 @@ All implementation work in this log is after the official Zero Dependency Hackat
 - Added deterministic configuration selection and safe referenced-file containment checks.
 - Implemented target-object loading for ids, names, types, sources, artifacts, and target dependencies.
 - Implemented exact normalized CTest executable-artifact mapping; basename-only matching remains forbidden.
-- Wired real safety outcomes into `analyze`:
+- Wired safety outcomes into `analyze`:
   - missing/untrusted CTest catalogue -> `FULL_SUITE_REQUIRED`;
   - bad/ambiguous CMake metadata -> `FULL_SUITE_SELECTED`;
   - non-unique/unmapped test executable -> `FULL_SUITE_SELECTED`.
 
 ### End-to-end impact slice
 
-- Implemented explicit `--dep-list` loading; diff2test still never invokes the compiler, CMake, CTest, Git, or a shell.
+- Implemented explicit `--dep-list` loading; diff2test still never invokes the compiler, CMake, CTest, Git, Python, or a shell.
 - Each listed dependency file is parsed as untrusted Make-style dependency evidence.
 - Dependency coverage is tracked per `(CMake target, compiled source)` pair, preventing a source compiled into several targets from being treated as covered after only one `.d` file.
 - The controlled Unix Makefiles MVP maps a dependency-rule target through `CMakeFiles/<target>.dir/`; unmatched or ambiguous layouts trigger full-suite fallback rather than guessing.
 - Implemented changed-path ingestion from a file or stdin.
 - Unknown changed paths, build-configuration changes, malformed dependency evidence, duplicate dependency evidence, missing translation-unit coverage, root mismatches, or unknown target edges widen to the full known suite.
 - Implemented changed path -> translation unit -> owning target -> reverse target dependency propagation -> mapped CTest test selection.
-- `SUBSET_SELECTED` is now reachable only after the CTest catalogue, codemodel, exact test mapping, dependency coverage, changed-path classification, and target graph all pass their completeness checks.
-- Added `impact_tests` with a successful subset case and mutations for missing `.d` coverage, unknown changed paths, and a missing CTest catalogue.
+- `SUBSET_SELECTED` is reachable only after the CTest catalogue, codemodel, exact test mapping, dependency coverage, changed-path classification, and target graph pass their completeness checks.
 
-### Verification
+### Safety hardening
 
-A clean local CMake build using `-Wall -Wextra -Wpedantic -Wconversion -Wshadow` passed all six registered test executables:
+- Expanded `impact_tests` into an adversarial mutation matrix covering:
+  - missing dependency coverage;
+  - malformed dependency files;
+  - missing dependency list;
+  - duplicate dependency evidence;
+  - unknown changed paths;
+  - changed CMake configuration files;
+  - malformed, unsupported, and missing CTest catalogues;
+  - wrapper-style CTest commands;
+  - malformed and ambiguous CMake indexes;
+  - missing target objects;
+  - declared-root mismatch;
+  - unknown target dependency edges.
+- Added a detectable-staleness audit for project prerequisites in `.d` files. A project prerequisite newer than its `.d` file, or an unreadable required timestamp, prevents subset output.
+- Added a stale-evidence mutation test that deliberately makes a `.d` file older than a project header and verifies `FULL_SUITE_SELECTED`.
+- Preserved the documented freshness caveat: passing timestamp checks means no detectable staleness under this policy, not cryptographic proof that metadata matches source contents.
+- Replaced generic explanation text with concrete evidence chains containing the changed path, dependency file, translation unit, owning target, propagated dependent targets where applicable, and registered test.
 
-- `json_tests`
-- `dep_tests`
-- `path_tests`
-- `ctest_tests`
-- `cmake_tests`
-- `impact_tests`
+### CI and real generated-metadata verification
 
-Result: 6/6 tests passed, with no compiler warnings observed in the final local sweep.
+- Added a public GitHub Actions workflow using only runner-provided Git/CMake/compiler/CTest as development/build tooling. No GitHub Action package is required for checkout; the workflow performs a plain Git fetch of the exact commit.
+- CI builds the single runtime source and all six test executables with the repository warning configuration, then runs the full CTest suite.
+- CI audits `diff2test.cpp` for runtime process-spawn APIs and inspects dynamic linkage with `ldd`; neither operation is performed by the diff2test runtime artifact.
+- Added a real controlled-fixture integration gate:
+  - creates the CMake File API query externally;
+  - configures/builds the fixture externally;
+  - exports CTest `json-v1` externally;
+  - collects real compiler `.o.d` files into an explicit dependency list;
+  - runs diff2test on `include/alpha.hpp` and requires exactly `AlphaTest` with exit 0;
+  - removes the `alpha` dependency evidence and requires all three tests (`AlphaTest`, `BetaTest`, `CoreTest`) with exit 10.
+- GitHub Actions run `33205121938` completed successfully: configure, build, tests, metadata generation, selective analysis, missing-evidence fallback, subprocess audit, and dynamic-link inspection all passed.
 
-No runtime process-spawning or network functionality has been introduced.
+### Current verified state
 
-### Remaining release blockers
+- Single implementation source: `diff2test.cpp`.
+- Zero third-party runtime code introduced.
+- No runtime subprocess or network capability introduced.
+- Synthetic parser/loader/impact tests pass in CI.
+- Expanded safety mutation suite passes in CI.
+- Detectable stale `.d` evidence causes conservative fallback.
+- Real externally generated CMake/compiler/CTest metadata produces the intended narrow selection.
+- Real removal of dependency evidence produces the intended full-known-suite fallback.
+- Safety and input contracts have been updated to match the implemented freshness and generator-layout boundaries.
 
-- Add a broader safety-mutation matrix: malformed listed `.d`, duplicate/ambiguous mappings, altered configuration metadata, wrapper-style CTest commands, and more graph mutations.
-- Add detectable `.d` staleness/freshness handling or explicitly narrow the safety contract before release; stale metadata must never be advertised as proven fresh.
-- Replace generic explanation text with concrete changed path / translation-unit / target / evidence-file paths.
-- Exercise the real controlled fixture end to end using metadata generated externally by CMake/compiler/CTest, not only the synthetic integration fixture.
-- Document the current Unix Makefiles dependency-target layout boundary clearly in final README/STDLIB/limitations.
+### Next work
+
+- Run additional deterministic-output and graph traversal hardening cases (input-order shuffling, target chain/diamond/cycle where applicable).
+- Perform robustness/resource-limit and warning/sanitizer sweeps where available as dev tooling.
+- Replace the skeletal root README with the actual verified usage/build/limits documentation.
+- Produce the final `STDLIB.md` from genuine implemented substitutions only.
+- Produce dependency-proof documentation/raw evidence and final submission metadata.
+- Rehearse the five-minute demo from a clean checkout after documentation is frozen.
