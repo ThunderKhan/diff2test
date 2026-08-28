@@ -72,12 +72,12 @@ void fixture(const std::filesystem::path& root) {
     put(root / "changed.txt", "include/alpha.hpp\n");
 }
 
-void expect_full(const d2t::analysis::AnalysisResult& result, const char* name) {
+void expect_full(const d2t::analysis::Result& result, const char* name) {
     check(result.outcome == d2t::core::Outcome::FullSuiteSelected, name);
     check(result.selected_tests == std::vector<std::string>{"AlphaTest"}, name);
 }
 
-void expect_required(const d2t::analysis::AnalysisResult& result, const char* name) {
+void expect_required(const d2t::analysis::Result& result, const char* name) {
     check(result.outcome == d2t::core::Outcome::FullSuiteRequired, name);
     check(result.selected_tests.empty(), name);
 }
@@ -153,7 +153,6 @@ int main() {
     expect_full(d2t::analysis::analyze(options), "ambiguous CMake index falls back");
 
     fixture(root);
-    const auto project = root / "project";
     put(root / "build/.cmake/api/v1/reply/codemodel.json",
         std::string("{\"paths\":{\"source\":\"") + (root / "other-project").string() +
             "\",\"build\":\"" + (root / "build").string() +
