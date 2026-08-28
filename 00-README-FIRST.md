@@ -1,4 +1,4 @@
-# TestImpact++ Pre-Hackathon Planning Pack
+# diff2test Pre-Hackathon Planning Pack
 
 **Owner:** Ayan Khan  
 **Team:** `std::zero`  
@@ -8,21 +8,21 @@
 
 ## Purpose
 
-This folder is a planning system for building TestImpact++ during the official 72-hour Zero Dependency Hackathon. It contains product decisions, input and CLI contracts, safety rules, technical risks, tests to write after kickoff, and a timed runbook.
+This folder is a planning system for building diff2test during the official 72-hour Zero Dependency Hackathon. It contains product decisions, input and CLI contracts, safety rules, technical risks, tests to write after kickoff, and a timed runbook.
 
 It intentionally contains **no project implementation**, executable test, reusable fixture, build script, or C++ source. The official website and the organizer's written response prohibit project code before kickoff.
 
 ## One-sentence product definition
 
-TestImpact++ is a zero-runtime-dependency C++20 CLI that consumes changed paths and pre-generated CMake/compiler/CTest metadata, selects only the tests whose impact can be justified by that evidence, explains every selection, and requests the full suite whenever the evidence is incomplete.
+diff2test is a zero-runtime-dependency C++20 CLI that consumes changed paths and pre-generated CMake/compiler/CTest metadata, selects only the tests whose impact can be justified by that evidence, explains every selection, and requests the full suite whenever the evidence is incomplete.
 
 ## Locked decisions
 
 1. The program will never launch Git, CMake, CTest, a compiler, a shell, Python, or another executable at runtime.
 2. Changed paths arrive through a file or standard input; an external shell may pipe Git output into the program.
-3. CMake File API replies, compiler `.d` files, and CTest `json-v1` output are data inputs, not programs invoked by TestImpact++.
+3. CMake File API replies, compiler `.d` files, and CTest `json-v1` output are data inputs, not programs invoked by diff2test.
 4. Missing, malformed, stale, ambiguous, or unsupported evidence expands the selection to all known tests or emits `FULL_SUITE_REQUIRED` when no catalogue is available.
-5. The primary bonus target is **Single File**: one readable `testimpact.cpp`, with tests, docs, fixtures, and build files separate.
+5. The primary bonus target is **Single File**: one readable `diff2test.cpp`, with tests, docs, fixtures, and build files separate.
 6. Linux with GCC-compatible dependency files is the MVP platform. Broader platform support is a stretch goal.
 7. Safety is asymmetric: selecting too many tests is acceptable; silently skipping a possibly affected test is not.
 
@@ -41,9 +41,8 @@ TestImpact++ is a zero-runtime-dependency C++20 CLI that consumes changed paths 
 11. `DEMO-CONTRACT.md`
 12. `TASKS.md`
 13. `KICKOFF-RUNBOOK.md`
-14. `CLAUDE.md`
-15. `submission-outlines/`
-16. `SOURCES.md`
+14. `submission-outlines/`
+15. `SOURCES.md`
 
 ## Authority order
 
@@ -76,4 +75,3 @@ The submission succeeds if a judge can quickly verify that it:
 - safely requests the full suite when evidence becomes incomplete;
 - documents limitations and stdlib substitutions honestly;
 - can be demonstrated from a clean checkout within five minutes.
-
