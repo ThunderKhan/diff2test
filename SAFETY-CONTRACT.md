@@ -31,17 +31,17 @@ An invariant or unexpected exception failed. Never emit a partial subset after t
 ## 3. Decision order
 
 1. Validate CLI and changed-path source.
-2. Attempt to parse CTest catalogue early enough to know whether full known selection is possible.
+2. Parse the CTest catalogue early enough to know whether full-known selection is possible.
 3. Validate roots and metadata versions.
-4. Load and completeness-check File API/codemodel.
-5. Load and completeness-check dependency files.
-6. Map every registered test under MVP mapping rules.
-7. Normalize/classify every changed path.
-8. Build graph and traverse impact.
-9. Audit all safety flags.
+4. Load and completeness-check File API/codemodel data.
+5. Map every registered test under the supported exact-artifact rules.
+6. Load and completeness-check the explicit dependency-file list.
+7. Reject dependency evidence whose project prerequisites are detectably newer than the corresponding `.d` file.
+8. Normalize/classify every changed path.
+9. Build the reverse target graph and traverse impact.
 10. Only then commit to subset output.
 
-No streaming of tentative subset names to stdout before the safety audit completes.
+No tentative subset names are emitted before the final safety decision.
 
 ## 4. Safety matrix
 
@@ -50,41 +50,40 @@ No streaming of tentative subset names to stdout before the safety audit complet
 | CTest file absent/unreadable | `FULL_SUITE_REQUIRED` | cannot enumerate suite |
 | CTest JSON malformed/unsupported major | `FULL_SUITE_REQUIRED` | catalogue untrusted |
 | duplicate/empty test name | `FULL_SUITE_REQUIRED` | catalogue ambiguous |
-| empty command array | `FULL_SUITE_SELECTED` if remaining catalogue trustworthy; otherwise required | mapping incomplete |
+| empty command array | `FULL_SUITE_SELECTED` if catalogue itself remains trustworthy | mapping incomplete |
 | wrapper/unmapped/ambiguous test command | `FULL_SUITE_SELECTED` | omitted wrapper test cannot be proven unaffected |
 | File API reply absent | `FULL_SUITE_SELECTED` | target/source mapping unavailable |
 | ambiguous reply index | `FULL_SUITE_SELECTED` | configuration snapshot unclear |
 | codemodel unsupported/malformed | `FULL_SUITE_SELECTED` | target graph untrusted |
-| build/project root mismatch | `FULL_SUITE_SELECTED` | paths may refer to different tree |
+| build/project root mismatch | `FULL_SUITE_SELECTED` | paths may refer to a different tree |
 | multiple configs without explicit selection | `FULL_SUITE_SELECTED` | artifact identity ambiguous |
 | target object missing | `FULL_SUITE_SELECTED` | graph incomplete |
-| relevant `.d` file absent/malformed | `FULL_SUITE_SELECTED` | include evidence incomplete |
-| stale `.d` detected | `FULL_SUITE_SELECTED` | dependencies may have changed |
+| generated source encountered | `FULL_SUITE_SELECTED` | generated/custom-command chain unsupported |
+| dependency list absent/unreadable | `FULL_SUITE_SELECTED` | include evidence unavailable |
+| listed `.d` absent/malformed | `FULL_SUITE_SELECTED` | include evidence incomplete |
+| duplicate `.d` / translation-unit evidence | `FULL_SUITE_SELECTED` | completeness is ambiguous |
 | `.d` target cannot map uniquely | `FULL_SUITE_SELECTED` | translation-unit ownership unclear |
+| project prerequisite timestamp cannot be inspected | `FULL_SUITE_SELECTED` | freshness audit incomplete |
+| project prerequisite newer than `.d` file | `FULL_SUITE_SELECTED` | detectable stale dependency evidence |
+| required translation unit has no `.d` evidence | `FULL_SUITE_SELECTED` | dependency coverage incomplete |
 | changed source/header known | continue | evidence node exists |
 | changed path unknown | `FULL_SUITE_SELECTED` | it may affect generation/configuration |
 | changed `CMakeLists.txt`/`.cmake` | `FULL_SUITE_SELECTED` | build graph may change |
-| changed test metadata/config | `FULL_SUITE_SELECTED` | registrations may change |
-| affected generated source/custom command | `FULL_SUITE_SELECTED` | generation chain unsupported |
-| graph cycle | traverse with visited set; fallback only if cycle type unsupported | cycles alone are not corruption |
-| path escapes declared roots | usage/input error; no subset | unsafe normalization |
-| input limit exceeded | full known suite or required | cannot safely finish analysis |
+| target dependency references unknown target | `FULL_SUITE_SELECTED` | propagation graph incomplete |
+| graph cycle | traverse with visited set | cycles alone are not corruption |
+| path escapes declared roots | no subset | unsafe normalization |
+| configured input limit exceeded | full known suite or required | cannot safely finish analysis |
 | unexpected exception | `INTERNAL_ERROR` | state unknown |
 
 ## 5. Unknown-path policy
 
-MVP uses an allowlist mindset. A changed path is known if it appears as one or more of:
+MVP uses an allowlist mindset. A changed path is known if it appears as project dependency evidence or as an explicitly recognized build-configuration path that causes fallback.
 
-- a codemodel source;
-- a dependency prerequisite inside project root;
-- an explicitly recognized build configuration file that causes fallback;
-- a registered input category intentionally modeled.
-
-Do not infer safety from extensions such as `.md`, `.txt`, or image files. A documentation file can still be consumed by a generator or test. Optional ignore rules are postponed until they can be configured and audited.
+Do not infer safety from extensions such as `.md`, `.txt`, or image files. A documentation file can still be consumed by a generator or test. Unknown project paths therefore widen to the full known suite rather than being silently ignored.
 
 ## 6. Deleted and renamed paths
 
-Deleted files may not appear in current metadata. Therefore any changed path that does not map in current evidence triggers full selection. For renames, callers should supply both old and new paths; if the old path is unknown, fallback remains correct.
+Deleted files may not appear in current metadata. Therefore any changed path that cannot be mapped in current evidence triggers full selection. For renames, callers should supply both old and new paths; if the old path is unknown, fallback remains correct.
 
 ## 7. Completeness model
 
@@ -92,49 +91,57 @@ An evidence source is not “complete” merely because some files were found.
 
 ### CTest completeness
 
-Requires a valid catalogue and a unique supported mapping for every registered test.
+Requires a valid catalogue and a unique supported executable-artifact mapping for every registered test.
 
 ### Codemodel completeness
 
-Requires every referenced in-scope target object to be present and supported under exactly one configuration.
+Requires every referenced in-scope target object to be present and supported under exactly one selected configuration, with declared source/build roots matching the caller's roots.
 
 ### Dependency completeness
 
-Requires supported `.d` evidence for every compiled translation unit that could participate in the relevant target/test graph, unless a narrower completeness proof is implemented and tested.
+The MVP uses an explicit `--dep-list`. For every supported compiled `.cpp` translation unit, identified as a `(CMake target, source)` pair, exactly one trusted dependency-file mapping must exist before subset output is allowed.
 
-Conservative MVP recommendation: require global dependency completeness for all in-scope project targets before allowing any subset. This may over-fallback but is easier to defend than partial completeness.
+This is deliberately global for the in-scope codemodel. It may over-fallback, but it avoids treating absence of evidence as evidence of absence.
+
+### Current dependency-target layout boundary
+
+For the Unix Makefiles-style layout validated by the controlled fixture, a dependency rule target is associated with a CMake target through the observed form:
+
+```text
+CMakeFiles/<target-name>.dir/...
+```
+
+A rule that does not map uniquely under this supported policy causes full-suite fallback. This is not a claim that every CMake generator uses the same layout.
 
 ## 8. Freshness model
 
-The tool cannot cryptographically prove correspondence between metadata and source state. It should:
+The implementation performs a **detectable-staleness audit** for project prerequisites in every trusted `.d` file:
 
-- compare build/project roots with codemodel paths;
-- optionally flag dependency files older than their known prerequisites;
-- expose a verbose summary of evidence files;
-- document that users must generate metadata in the same build workflow immediately before analysis.
+1. read the `.d` file modification timestamp;
+2. read the modification timestamp of each prerequisite that resolves inside the declared project root;
+3. if a project prerequisite is newer than the `.d` file, reject the evidence and emit the full known suite;
+4. if either timestamp cannot be inspected, reject subset selection rather than assuming freshness.
 
-If detectable staleness exists, fall back. If no staleness is detected, avoid claiming absolute freshness.
+This check does **not** prove absolute correspondence between source state and metadata. Equal/older timestamps can still be misleading in unusual or adversarial environments, clock behavior can be imperfect, and the tool does not cryptographically bind metadata to source contents.
+
+Users must therefore generate File API, compiler dependency, and CTest metadata in the same normal build workflow immediately before analysis. Passing the timestamp audit means **no detectable staleness under the supported check**, not “cryptographically fresh metadata.”
 
 ## 9. Explanation requirements
 
-Every subset-selected test needs one chain:
+Every subset-selected test receives a concrete evidence chain containing:
 
 ```text
 changed path
+  → dependency file
   → affected translation unit
-  → owning/affected target
-  → executable artifact mapping
-  → registered test
+  → owning target
+  → zero or more dependent targets
+  → registered CTest test
 ```
 
-Each edge must come from a named evidence source. Human output may abbreviate file paths, but verbose mode should identify source metadata.
+The current implementation prints concrete project-relative changed paths, build-relative dependency-file paths, translation-unit paths, target names, and test names. This is intended to make a judge or CI engineer able to audit why the test was selected.
 
-Full-suite fallback explanations must include:
-
-- category of uncertainty;
-- affected input/path/target when available;
-- why it prevents safe omission;
-- caller action.
+Full-suite fallback emits the concrete reason that prevented safe omission, such as missing dependency coverage, stale evidence, root mismatch, unsupported mapping, or an unknown changed path.
 
 ## 10. Exit and output rule
 
@@ -144,20 +151,23 @@ Safety status is decided before stdout is finalized. Names mode emits:
 - every catalogue name for `FULL_SUITE_SELECTED`;
 - no names for `FULL_SUITE_REQUIRED`.
 
-stderr always announces fallback/required states even without verbose mode.
+Fallback/required reasons are written to stderr. The deliberate non-zero safety statuses force CI integrations to acknowledge fallback instead of silently treating it as precise subset success.
 
 ## 11. Forbidden shortcuts
 
 - treating a missing `.d` file as “no dependencies”;
+- accepting a detectably stale `.d` file;
 - basename-only executable matching;
 - selecting tests by `*_test.cpp` filename conventions;
-- silently ignoring unknown JSON types for required members;
-- continuing after unsupported major versions;
+- silently ignoring unknown required JSON structure;
+- continuing through unsupported major versions;
 - assuming unknown changed extensions are harmless;
 - outputting a partial result alongside an internal error;
 - labeling fallback as precise selection;
-- launching a tool to fill missing evidence.
+- launching Git, CMake, CTest, a compiler, a shell, Python, or another external executable to fill missing evidence.
 
 ## 12. Safety review gate
 
-Before submission, construct a table of every place code can set an “incomplete” flag and verify that each flag reaches the final outcome decision. Add mutation tests manually by removing one evidence element at a time. Any missing edge that still produces `SUBSET_SELECTED` is a release blocker.
+The integration mutation suite deliberately removes or corrupts evidence and asserts that the result loses `SUBSET_SELECTED`. It currently covers missing/malformed/duplicate dependency evidence, stale evidence, unknown and build-configuration changes, CTest catalogue failures, wrapper-style test commands, malformed/ambiguous CMake metadata, root mismatch, and unknown target edges.
+
+The public CI additionally generates metadata from the controlled CMake fixture using external developer/build tooling, verifies a real narrow subset, removes required dependency evidence, and verifies the full-suite fallback. Any mutation that still produces subset success is a release blocker.
