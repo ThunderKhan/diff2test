@@ -14,7 +14,7 @@ Protect sleep. A tired parser author creates exactly the edge cases this project
 - verify global compiler/CMake/Git/editor installation;
 - preserve organizer email;
 - prepare a timer and submission checklist;
-- prepare post-kickoff Claude prompts as prose;
+- prepare post-kickoff AI-assistant prompts as prose;
 - do not create project code, fixtures, tests, build scripts, or official repo content early.
 
 ## H+0:00 to H+0:15 — Start clean
@@ -203,11 +203,11 @@ If any P0 is red, skip bonuses.
 - submit at least 20–30 minutes before deadline if platform permits;
 - preserve confirmation screenshot/email.
 
-## Claude Code prompt sequence after kickoff
+## AI-assistant prompt sequence after kickoff
 
 ### Prompt A — Spike reviewer
 
-Ask Claude to read the planning pack and inspect newly generated metadata, then report exact mappings and contradictions. Permit reads only initially; do not ask it to build the whole project.
+Ask the assistant to read the planning pack and inspect newly generated metadata, then report exact mappings and contradictions. Permit reads only initially; do not ask it to build the whole project.
 
 ### Prompt B — Task implementer
 
@@ -215,7 +215,7 @@ Give one bounded task from `TASKS.md`, its acceptance cases, relevant contract s
 
 ### Prompt C — Safety adversary
 
-After vertical slice, ask Claude to find any path by which missing evidence still reaches subset success. Require references to the safety matrix and new failing tests before fixes.
+After vertical slice, ask the assistant to find any path by which missing evidence still reaches subset success. Require references to the safety matrix and new failing tests before fixes.
 
 ### Prompt D — Single-file reviewer
 
@@ -223,7 +223,7 @@ Ask for readability review: section dependencies, functions too large, duplicate
 
 ### Prompt E — Submission auditor
 
-Ask Claude to compare README/STDLIB/dependency proof against actual code/build behavior and flag unsupported claims, hidden tool execution, third-party lookups, and demo commands that fail from clean checkout.
+Ask the assistant to compare README/STDLIB/dependency proof against actual code/build behavior and flag unsupported claims, hidden tool execution, third-party lookups, and demo commands that fail from clean checkout.
 
 ## Commit rhythm
 
@@ -279,4 +279,3 @@ Support only the controlled documented CMake/GCC/CTest shape, but keep strict va
 - log decisions immediately;
 - after two failed attempts, reduce/reframe task before trying a third;
 - sleep enough to explain every line to judges.
-
