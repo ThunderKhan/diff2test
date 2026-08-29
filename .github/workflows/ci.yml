@@ -29,6 +29,33 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+      - name: Verify CLI contract basics
+        shell: bash
+        run: |
+          build/diff2test --help > cli-help.txt
+          grep -q 'diff2test analyze' cli-help.txt
+          grep -qi 'never launches' cli-help.txt
+          build/diff2test --version | grep -q '^diff2test '
+
+          set +e
+          build/diff2test >/dev/null 2>cli-no-command.err
+          no_command=$?
+          build/diff2test bogus >/dev/null 2>cli-bogus.err
+          bogus=$?
+          build/diff2test analyze --bogus >/dev/null 2>cli-unknown.err
+          unknown=$?
+          build/diff2test analyze --project-root . --project-root . >/dev/null 2>cli-repeat.err
+          repeated=$?
+          build/diff2test analyze --dep-root build >/dev/null 2>cli-dep-root.err
+          dep_root=$?
+          set -e
+
+          test "$no_command" -eq 64
+          test "$bogus" -eq 64
+          test "$unknown" -eq 64
+          test "$repeated" -eq 64
+          test "$dep_root" -eq 64
+
       - name: Generate controlled fixture metadata externally
         shell: bash
         run: |
@@ -54,10 +81,48 @@ jobs:
             --format names 2>fixture/build/selective.err)
           status=$?
           set -e
-          printf '%s\n' "$output"
-          cat fixture/build/selective.err
           test "$status" -eq 0
           test "$output" = 'AlphaTest'
+
+      - name: Verify stdin and file input are equivalent
+        shell: bash
+        run: |
+          file_output=$(build/diff2test analyze \
+            --project-root "$(pwd)/fixture" \
+            --build-root "$(pwd)/fixture/build" \
+            --changed-files fixture/changed.txt \
+            --cmake-reply fixture/build/.cmake/api/v1/reply \
+            --ctest-info fixture/build/ctest-info.json \
+            --dep-list fixture/build/deps.txt \
+            --format names)
+          stdin_output=$(printf 'include/alpha.hpp\n' | build/diff2test analyze \
+            --project-root "$(pwd)/fixture" \
+            --build-root "$(pwd)/fixture/build" \
+            --changed-files - \
+            --cmake-reply fixture/build/.cmake/api/v1/reply \
+            --ctest-info fixture/build/ctest-info.json \
+            --dep-list fixture/build/deps.txt \
+            --format names)
+          test "$file_output" = "$stdin_output"
+          test "$stdin_output" = 'AlphaTest'
+
+      - name: Verify real shared-header multi-test selection
+        shell: bash
+        run: |
+          printf 'include/features_shared.hpp\n' > fixture/changed-shared.txt
+          set +e
+          output=$(build/diff2test analyze \
+            --project-root "$(pwd)/fixture" \
+            --build-root "$(pwd)/fixture/build" \
+            --changed-files fixture/changed-shared.txt \
+            --cmake-reply fixture/build/.cmake/api/v1/reply \
+            --ctest-info fixture/build/ctest-info.json \
+            --dep-list fixture/build/deps.txt \
+            --format names 2>fixture/build/shared.err)
+          status=$?
+          set -e
+          test "$status" -eq 0
+          test "$output" = $'AlphaTest\nBetaTest'
 
       - name: Verify byte-stable deterministic output
         shell: bash
@@ -117,10 +182,42 @@ jobs:
             --format names 2>fixture/build/fallback.err)
           status=$?
           set -e
-          printf '%s\n' "$output"
-          cat fixture/build/fallback.err
           test "$status" -eq 10
           test "$output" = $'AlphaTest\nBetaTest\nCoreTest'
+
+      - name: Verify missing catalogue behavior
+        shell: bash
+        run: |
+          set +e
+          output=$(build/diff2test analyze \
+            --project-root "$(pwd)/fixture" \
+            --build-root "$(pwd)/fixture/build" \
+            --changed-files fixture/changed.txt \
+            --cmake-reply fixture/build/.cmake/api/v1/reply \
+            --ctest-info fixture/build/missing-ctest.json \
+            --dep-list fixture/build/deps.txt \
+            --format names 2>fixture/build/missing-catalogue.err)
+          status=$?
+          set -e
+          test "$status" -eq 11
+          test -z "$output"
+
+      - name: Verify empty changed input is rejected
+        shell: bash
+        run: |
+          : > fixture/changed-empty.txt
+          set +e
+          build/diff2test analyze \
+            --project-root "$(pwd)/fixture" \
+            --build-root "$(pwd)/fixture/build" \
+            --changed-files fixture/changed-empty.txt \
+            --cmake-reply fixture/build/.cmake/api/v1/reply \
+            --ctest-info fixture/build/ctest-info.json \
+            --dep-list fixture/build/deps.txt \
+            --format names >/dev/null 2>fixture/build/empty.err
+          status=$?
+          set -e
+          test "$status" -eq 64
 
       - name: Audit runtime subprocess APIs
         shell: bash
@@ -132,8 +229,17 @@ jobs:
 
       - name: Show dynamic runtime linkage
         shell: bash
+        run: ldd build/diff2test | tee runtime-linkage.txt
+
+      - name: Verify clean release build and reproducibility
+        shell: bash
         run: |
-          ldd build/diff2test || true
+          cmake -S . -B release-a -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build release-a --parallel 2
+          cmake -S . -B release-b -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build release-b --parallel 2
+          sha256sum release-a/diff2test release-b/diff2test | tee reproducible-build-sha256.txt
+          cmp release-a/diff2test release-b/diff2test
 
   sanitizers:
     runs-on: ubuntu-latest
