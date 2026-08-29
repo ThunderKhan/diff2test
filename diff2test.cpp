@@ -28,7 +28,7 @@ enum class Outcome {
   InputError = 65,
   InternalError = 70
 };
-constexpr std::string_view kVersion = "0.1.0";
+constexpr std::string_view kVersion = "0.1.1";
 int exit_code(Outcome o) { return static_cast<int>(o); }
 } // namespace d2t::core
 
