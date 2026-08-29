@@ -35,6 +35,7 @@ jobs:
           build/diff2test --help > cli-help.txt
           grep -q 'diff2test analyze' cli-help.txt
           grep -qi 'never launches' cli-help.txt
+          grep -q 'changed paths: stdin' cli-help.txt
           build/diff2test --version | grep -q '^diff2test '
 
           set +e
@@ -48,6 +49,10 @@ jobs:
           repeated=$?
           build/diff2test analyze --dep-root build >/dev/null 2>cli-dep-root.err
           dep_root=$?
+          build/diff2test analyze . --project-root . >/dev/null 2>cli-root-conflict.err
+          root_conflict=$?
+          build/diff2test analyze . --build build --build-root build >/dev/null 2>cli-build-conflict.err
+          build_conflict=$?
           set -e
 
           test "$no_command" -eq 64
@@ -55,6 +60,8 @@ jobs:
           test "$unknown" -eq 64
           test "$repeated" -eq 64
           test "$dep_root" -eq 64
+          test "$root_conflict" -eq 64
+          test "$build_conflict" -eq 64
 
       - name: Generate controlled fixture metadata externally
         shell: bash
@@ -105,6 +112,37 @@ jobs:
             --format names)
           test "$file_output" = "$stdin_output"
           test "$stdin_output" = 'AlphaTest'
+
+      - name: Verify shorthand defaults and legacy equivalence
+        shell: bash
+        run: |
+          explicit=$(build/diff2test analyze \
+            --project-root "$(pwd)/fixture" \
+            --build-root "$(pwd)/fixture/build" \
+            --changed-files fixture/changed.txt \
+            --cmake-reply fixture/build/.cmake/api/v1/reply \
+            --ctest-info fixture/build/ctest-info.json \
+            --dep-list fixture/build/deps.txt \
+            --format names)
+
+          shorthand=$(printf 'include/alpha.hpp\n' | build/diff2test analyze "$(pwd)/fixture" --format names)
+          alias_form=$(printf 'include/alpha.hpp\n' | build/diff2test analyze "$(pwd)/fixture" --build "$(pwd)/fixture/build" --format names)
+          file_override=$(build/diff2test analyze "$(pwd)/fixture" --changed-files fixture/changed.txt --format names)
+
+          test "$explicit" = 'AlphaTest'
+          test "$shorthand" = "$explicit"
+          test "$alias_form" = "$explicit"
+          test "$file_override" = "$explicit"
+
+          set +e
+          printf 'include/alpha.hpp\n' | build/diff2test analyze "$(pwd)/fixture" \
+            --ctest-info fixture/build/missing-default-catalogue.json \
+            --format names >/tmp/missing-default.out 2>/tmp/missing-default.err
+          status=$?
+          set -e
+          test "$status" -eq 11
+          test ! -s /tmp/missing-default.out
+          grep -q 'FULL_SUITE_REQUIRED: CTest catalogue not found at' /tmp/missing-default.err
 
       - name: Verify real shared-header multi-test selection
         shell: bash
