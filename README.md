@@ -41,6 +41,10 @@ It reads metadata your existing toolchain already produced, builds an explainabl
 
 ## How it works
 
+<p align="center">
+  <img src="assets/diff2test-workflow.png" alt="How diff2test maps changed paths to affected CTest tests" width="100%" />
+</p>
+
 ```text
 changed path
     ↓
@@ -139,6 +143,10 @@ CoreTest
 ## Safety model
 
 The optimization is conditional. The fallback is not.
+
+<p align="center">
+  <img src="assets/diff2test-safety.png" alt="diff2test conservative safety outcomes" width="100%" />
+</p>
 
 | Exit | Outcome | Meaning |
 |---:|---|---|
