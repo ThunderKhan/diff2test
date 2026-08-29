@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(diff2test VERSION 0.1.0 LANGUAGES CXX)
+project(diff2test VERSION 0.1.1 LANGUAGES CXX)
 
 function(diff2test_warnings target)
     if(MSVC)
