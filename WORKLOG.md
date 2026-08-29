@@ -117,17 +117,18 @@ All implementation work in this log is after the official Zero Dependency Hackat
 - Added a separate dev-only CI job configured with GCC AddressSanitizer and UndefinedBehaviorSanitizer.
 - Sanitizers are used only to compile/run the test binaries in CI; they are not part of the normal shipped `diff2test` executable or its runtime requirements.
 - The sanitizer job builds the same test suite with `-fsanitize=address,undefined`, leak detection, halt-on-error behavior, and stack traces for undefined behavior.
-- Final sanitizer result is recorded after the corresponding CI run completes.
+- GitHub Actions run `33232624663` completed successfully: both the normal verification job and the sanitizer job passed, including all seven test executables under ASan/UBSan.
 
 ### Current verified state
 
 - Single runtime implementation source: `diff2test.cpp`.
 - Zero third-party runtime code introduced.
 - No runtime subprocess or network capability introduced.
-- Parser, loader, impact, mutation, stale-evidence, graph-shape, and deterministic-result tests are registered in CI.
+- Parser, loader, impact, mutation, stale-evidence, graph-shape, deterministic-result, and resource-boundary tests are registered in CI.
 - Real externally generated CMake/compiler/CTest metadata produces the intended narrow selection.
 - Real removal of dependency evidence produces the intended full-known-suite fallback.
 - CLI human/explain output is byte-stable under reordered evidence and across 20 repeated real-fixture analyses.
+- All seven registered test executables pass under AddressSanitizer and UndefinedBehaviorSanitizer in dev-only CI.
 - Safety and input contracts match the implemented freshness and generator-layout boundaries.
 
 ### Next work
