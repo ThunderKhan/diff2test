@@ -15,7 +15,7 @@ diff2test_warnings(diff2test)
 
 include(CTest)
 if(BUILD_TESTING)
-    foreach(test_name IN ITEMS json_tests dep_tests path_tests ctest_tests cmake_tests impact_tests)
+    foreach(test_name IN ITEMS json_tests dep_tests path_tests ctest_tests cmake_tests impact_tests hardening_tests)
         add_executable(${test_name} tests/${test_name}.cpp)
         target_compile_features(${test_name} PRIVATE cxx_std_20)
         diff2test_warnings(${test_name})
