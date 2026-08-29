@@ -43,6 +43,16 @@ Therefore the precise statement is:
 
 These are genuine substitutions present in the current implementation/test workflow; this table intentionally omits features that were never implemented.
 
+## Package Killer target: RTS++ / Ekstazi++
+
+For the Package Killer bonus, the primary comparison target is [`EngineeringSoftware/ekstazipp`](https://github.com/EngineeringSoftware/ekstazipp), which describes itself as a **Regression Test Selection tool for C++**.
+
+Its CMake build requires LLVM via `find_package(LLVM REQUIRED CONFIG)`, builds an LLVM pass and `ekstazi-lib`, and installs CMake package/export files. Its README also points to separate SHA-512 source as a dependency. In contrast, `diff2test` implements the narrow supported CMake/CTest RTS workflow with one C++20 runtime source and no third-party runtime package.
+
+The claim is deliberately scoped: `diff2test` is **not** a drop-in replacement for all RTS++ functionality. It replaces the dedicated RTS stack only for the tested workflow where CMake File API, compiler `.d`, CTest JSON, and changed-path evidence are already available.
+
+See [`PACKAGE-KILLER.md`](PACKAGE-KILLER.md) for the complete side-by-side comparison, dependency evidence, substitutions, limitations, and CI proof.
+
 ## What the standard library handled well
 
 ### `std::filesystem`
@@ -141,5 +151,6 @@ Those limits are part of the safety design, not hidden compatibility claims.
 - [x] CMake explicitly classified as permitted build/input-generation tooling rather than runtime dependency
 - [x] development/test tooling distinguished from runtime
 - [x] no vendored third-party source claimed or used
-- [x] no Package Killer claim made without evidence
+- [x] Package Killer target and feature/dependency comparison documented in `PACKAGE-KILLER.md`
+- [x] Package Killer scope is explicitly narrower than a drop-in RTS++ replacement
 - [x] dependency-proof document linked
