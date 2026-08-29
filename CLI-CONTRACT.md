@@ -13,7 +13,7 @@ Product name in prose: **diff2test**.
 ## 2. Commands
 
 ```text
-diff2test analyze [options]
+diff2test analyze [project-root] [options]
 diff2test --help
 diff2test --version
 ```
@@ -23,13 +23,12 @@ Only `analyze` performs analysis. Unknown commands and options are usage errors.
 ## 3. Analyze synopsis
 
 ```bash
-diff2test analyze \
-  --project-root <dir> \
-  --build-root <dir> \
-  --changed-files <file|-> \
-  --cmake-reply <dir> \
-  --ctest-info <file> \
-  --dep-list <file> \
+diff2test analyze [project-root] \
+  [--build <dir> | --build-root <dir>] \
+  [--changed-files <file|->] \
+  [--cmake-reply <dir>] \
+  [--ctest-info <file>] \
+  [--dep-list <file>] \
   [--cmake-index <file>] \
   [--configuration <name>] \
   [--format human|names] \
@@ -37,19 +36,32 @@ diff2test analyze \
   [--verbose]
 ```
 
-The kickoff metadata spike found non-compilation `.d` files such as `link.d` in the build tree. To avoid generator-specific guessing, the MVP deliberately requires an explicit `--dep-list`. Recursive `--dep-root` discovery is unsupported.
+Convention defaults:
+
+```text
+project-root    .
+build-root      <project-root>/build
+changed-files   stdin
+cmake-reply     <build-root>/.cmake/api/v1/reply
+ctest-info      <build-root>/ctest-info.json
+dep-list        <build-root>/deps.txt
+```
+
+The metadata spike found non-compilation `.d` files such as `link.d` in build trees. To avoid generator-specific guessing, the MVP deliberately does **not** recursively discover `.d` files. The dependency-list path merely has a deterministic default; the existing completeness and target/TU validation remains authoritative.
 
 ## 4. Options
 
 | Option | Required | Implemented MVP meaning |
 |---|---:|---|
-| `--project-root <dir>` | yes | top-level source root |
-| `--build-root <dir>` | yes | build-tree root |
-| `--changed-files <file|->` | yes | newline-delimited changed paths; `-` reads stdin |
-| `--cmake-reply <dir>` | yes | File API v1 reply directory |
+| positional `[project-root]` | no | top-level source root; defaults to `.` |
+| `--project-root <dir>` | no | explicit alternative to positional project root; using both is a usage error |
+| `--build <dir>` | no | convenience alias for build root |
+| `--build-root <dir>` | no | build-tree root; defaults to `<project-root>/build`; cannot be combined with `--build` |
+| `--changed-files <file|->` | no | newline-delimited changed paths; omitted or `-` reads stdin |
+| `--cmake-reply <dir>` | no | File API v1 reply directory; defaults to `<build-root>/.cmake/api/v1/reply` |
 | `--cmake-index <file>` | no | explicit index when reply-directory selection would otherwise be ambiguous |
-| `--ctest-info <file>` | yes | pre-generated CTest JSON |
-| `--dep-list <file>` | yes | newline-delimited explicit list of compiler dependency files |
+| `--ctest-info <file>` | no | pre-generated CTest JSON; defaults to `<build-root>/ctest-info.json` |
+| `--dep-list <file>` | no | newline-delimited explicit list of compiler dependency files; defaults to `<build-root>/deps.txt` |
 | `--configuration <name>` | conditional | selects one codemodel configuration when more than one exists |
 | `--format <value>` | no | `human` (default) or `names` |
 | `--explain` | no | include evidence chains in human output |
@@ -63,7 +75,13 @@ The MVP does not implement color or `--no-color`.
 
 No CLI option generates metadata, runs tests, invokes Git, or launches another program. The runtime contains no supported `--run`, `--generate`, `--git-base`, or similar option.
 
-CMake, CTest, Git, and the compiler may generate inputs externally. `diff2test` only reads the supplied files/stdin.
+CMake, CTest, Git, the compiler, and shell utilities may generate inputs externally. `diff2test` only reads files and stdin. A shell pipeline such as:
+
+```bash
+git diff --name-only HEAD~1 | diff2test analyze .
+```
+
+is caller-side composition: the shell launches Git and writes newline-delimited paths to `diff2test` stdin.
 
 ## 6. Output contract
 
@@ -131,7 +149,7 @@ STATUS: FULL_SUITE_REQUIRED
 stderr contains the reason with the same symbolic prefix, for example:
 
 ```text
-diff2test: FULL_SUITE_REQUIRED: cannot open file: <ctest-json-path>
+diff2test: FULL_SUITE_REQUIRED: CTest catalogue not found at build/ctest-info.json
 ```
 
 Names mode emits no invented test names. The process exits `11`.
@@ -175,6 +193,7 @@ Verified behavior:
 - graph traversal uses ordered adjacency/visited structures;
 - explanation predecessor choice is deterministic for the supported graph;
 - reordered `.d` list input and duplicate changed paths produce byte-identical output in the real fixture;
+- shorthand and fully explicit invocations produce the same analysis result;
 - CI repeats the same real analysis 20 times and compares stdout/stderr byte-for-byte.
 
 ## 10. Help contract
@@ -182,15 +201,13 @@ Verified behavior:
 The built-in `--help` is intentionally concise. It states:
 
 - the available commands;
-- required analyze options;
-- optional analyze flags;
-- `--changed-files <file|->` stdin form;
+- the positional project root and deterministic defaults;
+- explicit override flags;
+- that omitted `--changed-files` reads stdin;
 - that CMake, CTest, Git, and the compiler may generate input externally;
 - that `diff2test` never launches them or any other program at runtime.
 
 The complete platform/metadata boundaries, external input-generation examples, safety outcomes, and exit table live in `README.md` and this contract rather than duplicating a long manual inside the binary help string.
-
-CI verifies the help command succeeds and contains the analyze usage plus the no-launch boundary.
 
 ## 11. Invalid invocation and analysis boundaries
 
@@ -200,14 +217,17 @@ Verified usage-error (`64`) cases include:
 - unknown command;
 - unknown option, including removed `--dep-root`;
 - repeated single-valued option;
-- missing required option/value;
+- missing option value;
 - invalid `--format` value;
-- empty changed-path list after required metadata/catalogue inputs can be loaded.
+- more than one positional project root;
+- using both positional project root and `--project-root`;
+- using both `--build` and `--build-root`;
+- empty changed-path input after required metadata/catalogue inputs can be loaded.
 
 Some invalid-looking analysis inputs are deliberately **safety fallbacks**, not usage errors. For example, a declared project/build root that does not match trusted codemodel evidence produces `FULL_SUITE_SELECTED` when the catalogue is known. Unsupported/invalid configuration selection likewise flows through the metadata safety path rather than being guessed through.
 
-The MVP does not attempt TTY detection for `--changed-files -`.
+The MVP does not attempt TTY detection. Omitted `--changed-files` and explicit `--changed-files -` both consume stdin.
 
 ## 12. Compatibility policy
 
-The command names, required inputs, output modes, and safety exit statuses are frozen for the hackathon MVP. Any future behavioral expansion should update this contract, `SAFETY-CONTRACT.md`, tests, README examples, and demo commands together.
+The legacy fully explicit form remains supported. The shorthand interface is a convention-over-configuration layer over the same analysis engine and safety outcomes; it does not weaken completeness checks or add hidden process execution.
