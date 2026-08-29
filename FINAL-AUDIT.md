@@ -28,7 +28,7 @@ Potential documented bonus total: **+16**, subject to organizer/judge acceptance
 | Task | Status | Evidence |
 |---|---|---|
 | T0.1 official repository | ✅ | public repo created after official kickoff; work log records in-window implementation |
-| T0.2 metadata capture spike | ✅ | controlled fixture + `SPIKE-RESULTS.md` |
+| T0.2 metadata capture spike | ✅ | controlled `fixture/` + `WORKLOG.md` metadata-spike record + public CI generated-metadata verification |
 | T0.3 artifact-to-test mapping spike | ✅ | exact normalized CTest command ↔ File API artifact mapping verified |
 | T0.4 `.d` mapping/completeness spike | ✅ | observed compiler `.o.d` plus unrelated `link.d`; chose explicit `--dep-list` |
 | T0.5 freeze MVP contracts | ✅ | CLI/input/safety contracts updated to tested boundary |
