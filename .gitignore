@@ -1,0 +1,11 @@
+# Build outputs
+build/
+release-build/
+fixture/build/
+
+# Generated demo input
+fixture/changed.txt
+
+# Release artifacts
+diff2test-linux-x86_64
+SHA256SUMS.txt

@@ -21,7 +21,7 @@
 
 namespace d2t::core {
 enum class Outcome { SubsetSelected=0, FullSuiteSelected=10, FullSuiteRequired=11, UsageError=64, InputError=65, InternalError=70 };
-constexpr std::string_view kVersion = "0.1.0-dev";
+constexpr std::string_view kVersion = "0.1.0";
 int exit_code(Outcome o){ return static_cast<int>(o); }
 }
 
