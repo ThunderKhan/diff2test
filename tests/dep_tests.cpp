@@ -2,6 +2,7 @@
 #include "../diff2test.cpp"
 
 #include <iostream>
+#include <string>
 #include <string_view>
 
 namespace {
@@ -51,6 +52,15 @@ int main() {
     {
         const auto result = d2t::dep::parse("# comment\nobj.o: src.cpp # comment\n");
         check(result.ok() && result.rules.size() == 1, "comments");
+    }
+    {
+        std::string large = "obj.o:";
+        for (int i = 0; i < 10000; ++i) large += " include/header_" + std::to_string(i) + ".hpp";
+        large += '\n';
+        const auto result = d2t::dep::parse(large);
+        check(result.ok(), "10k prerequisite rule parses");
+        check(result.ok() && result.rules.size() == 1 && result.rules[0].prerequisites.size() == 10000,
+              "10k prerequisite rule preserves all prerequisites");
     }
 
     expect_error("obj.o src.cpp\n", "DEP_MISSING_COLON", "missing colon");
