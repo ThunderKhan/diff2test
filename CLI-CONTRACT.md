@@ -83,6 +83,24 @@ git diff --name-only HEAD~1 | diff2test analyze .
 
 is caller-side composition: the shell launches Git and writes newline-delimited paths to `diff2test` stdin.
 
+### Git is optional
+
+Git is **not a runtime dependency of `diff2test`**. The program does not link against a Git library, invoke the `git` executable, inspect a Git repository, or require Git-specific metadata. Git appears in examples only as a convenient external producer of newline-delimited changed paths.
+
+Equivalent input may come from any source that can provide the same path list, for example:
+
+```bash
+printf 'include/alpha.hpp\n' | diff2test analyze .
+```
+
+or:
+
+```bash
+diff2test analyze . --changed-files changed.txt
+```
+
+Accordingly, `git diff ... | diff2test analyze .` should be read as optional shell composition, not as an internal integration or dependency.
+
 ## 6. Output contract
 
 ### 6.1 Human subset success
