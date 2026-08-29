@@ -61,6 +61,21 @@ int main() {
     const auto nesting_result = d2t::json::parse("[[[]]]", nesting);
     check(!nesting_result.ok() && nesting_result.error && nesting_result.error->code == "JSON_NESTING_LIMIT", "nesting limit");
 
+    d2t::json::ParseOptions input_limit;
+    input_limit.max_bytes = 4;
+    const auto input_limit_result = d2t::json::parse("[123]", input_limit);
+    check(!input_limit_result.ok() && input_limit_result.error && input_limit_result.error->code == "JSON_INPUT_TOO_LARGE", "input byte limit");
+
+    d2t::json::ParseOptions string_limit;
+    string_limit.max_string_bytes = 3;
+    const auto string_limit_result = d2t::json::parse("\"abcd\"", string_limit);
+    check(!string_limit_result.ok() && string_limit_result.error && string_limit_result.error->code == "JSON_STRING_TOO_LARGE", "string byte limit");
+
+    d2t::json::ParseOptions exact_limit;
+    exact_limit.max_bytes = 5;
+    exact_limit.max_string_bytes = 3;
+    check(d2t::json::parse("\"abc\"", exact_limit).ok(), "exact resource limits accepted");
+
     const auto object = d2t::json::parse("{\"name\":\"alpha\"}");
     check(object.ok(), "accessor parse");
     if (object.ok()) {
