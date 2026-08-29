@@ -1,45 +1,104 @@
+<div align="center">
+
 # diff2test
 
-**A zero-third-party-runtime-dependency C++20 test-impact analyzer for CMake/CTest projects.**
+**Conservative, zero-runtime-dependency test impact analysis for CMake/CTest.**
 
-Built for the Zero Dependency Hackathon — Track A: Developer Tools & CLI, team `std::zero`.
+Select only the tests your build evidence can actually justify — and widen safely when that evidence is incomplete.
 
-`diff2test` answers one question conservatively: **given a set of changed project paths, which registered CTest tests can be justified as affected by metadata the build already produced?** If the evidence is incomplete, malformed, stale, unsupported, or ambiguous, it refuses to guess and widens to the full known suite.
+[![CI](https://github.com/ThunderKhan/diff2test/actions/workflows/ci.yml/badge.svg)](https://github.com/ThunderKhan/diff2test/actions/workflows/ci.yml)
+![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus&logoColor=white)
+![Zero Runtime Dependencies](https://img.shields.io/badge/runtime%20dependencies-zero-00b894)
+![Single File](https://img.shields.io/badge/runtime%20implementation-single%20file-6c5ce7)
+![License](https://img.shields.io/badge/license-MIT-2ea44f)
 
-## Why
+**Zero Dependency Hackathon · Track A: Developer Tools & CLI · `std::zero`**
 
-Running every C++ test is safe but can be slow. Naive test selection is faster but dangerous: a false negative can hide a regression. CMake, compilers, and CTest already emit useful structural evidence, but that evidence is fragmented across formats.
+[Quick start](#quick-start) · [How it works](#how-it-works) · [Safety model](#safety-model) · [Verification](#verification) · [Package Killer](#package-killer) · [Docs](#documentation)
 
-`diff2test` connects those formats without invoking the tools that produced them:
+</div>
+
+---
+
+## Why diff2test?
+
+Large C++ projects often face a bad tradeoff:
+
+- **Run everything** — safe, but potentially expensive.
+- **Guess what changed** — fast, but a false negative can hide a regression.
+
+`diff2test` takes a stricter approach:
+
+> **A test is omitted only when the available build evidence justifies omitting it.**
+
+It reads metadata your existing toolchain already produced, builds an explainable impact graph, and selects the affected CTest tests. If the evidence becomes missing, malformed, stale, ambiguous, or unsupported, the result widens instead of guessing.
+
+### What it does not do
+
+`diff2test` does **not** run tests and does **not** launch Git, CMake, CTest, a compiler, Python, a shell, a network service, or another executable at runtime.
+
+---
+
+## How it works
 
 ```text
 changed path
-  -> compiler dependency evidence (.d)
-  -> translation unit
-  -> CMake target
-  -> dependent target(s)
-  -> executable artifact
-  -> registered CTest test
+    ↓
+compiler dependency evidence (.d)
+    ↓
+translation unit
+    ↓
+CMake target
+    ↓
+dependent target(s)
+    ↓
+executable artifact
+    ↓
+registered CTest test
 ```
 
-The safety rule is intentionally asymmetric:
+The supported analysis combines four pre-generated inputs:
 
-> A false positive costs time. A false negative can hide a bug. When evidence is uncertain, run everything.
+| Evidence | Purpose |
+|---|---|
+| changed paths | what the caller says changed |
+| CMake File API codemodel v2 | sources, targets, artifacts, target dependencies |
+| GCC/Clang Make-style `.d` files | file/header → translation-unit dependency evidence |
+| CTest `json-v1` catalogue | registered tests and their command executables |
 
-## What it consumes
+For every selected test, `--explain` can show a concrete evidence chain from the changed path to the registered test.
 
-All inputs are generated or supplied **before** `diff2test` runs:
+---
 
-- newline-delimited changed paths;
-- a CMake File API reply directory containing codemodel v2 data;
-- an explicit list of GCC/Clang Make-style `.d` files;
-- CTest `--show-only=json-v1` output.
+## Quick start
 
-`diff2test` does **not** run tests and does **not** launch Git, CMake, CTest, a compiler, Python, a shell, or another external executable.
+### 1. Build `diff2test`
 
-## 30-second example
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+cmake --build build
+```
 
-After generating the fixture metadata as shown below:
+The executable is produced at:
+
+```text
+build/diff2test
+```
+
+### 2. Generate fixture metadata externally
+
+These commands are part of the developer/user workflow. They are **not** executed by `diff2test`.
+
+```bash
+cmake -E make_directory fixture/build/.cmake/api/v1/query
+cmake -E touch fixture/build/.cmake/api/v1/query/codemodel-v2
+cmake -S fixture -B fixture/build -DCMAKE_BUILD_TYPE=Debug
+cmake --build fixture/build
+ctest --test-dir fixture/build --show-only=json-v1 > fixture/build/ctest-info.json
+find fixture/build -type f -name '*.o.d' -printf '%P\n' | sort > fixture/build/deps.txt
+```
+
+### 3. Analyze a change
 
 ```bash
 printf 'include/alpha.hpp\n' > fixture/changed.txt
@@ -60,14 +119,14 @@ Verified output:
 AlphaTest
 ```
 
-A real CI integration test also changes `include/features_shared.hpp` and verifies that exactly these two tests are selected:
+A shared-header change is also verified to select exactly:
 
 ```text
 AlphaTest
 BetaTest
 ```
 
-Removing required dependency evidence causes exit status `10` and emits the full known fixture suite instead:
+If required dependency evidence is removed, the tool returns exit `10` and emits the full known fixture suite:
 
 ```text
 AlphaTest
@@ -75,9 +134,68 @@ BetaTest
 CoreTest
 ```
 
+---
+
+## Safety model
+
+The optimization is conditional. The fallback is not.
+
+| Exit | Outcome | Meaning |
+|---:|---|---|
+| `0` | `SUBSET_SELECTED` | complete supported evidence justified the emitted subset |
+| `10` | `FULL_SUITE_SELECTED` | test catalogue is trusted, but other evidence is unsafe; emit every known test |
+| `11` | `FULL_SUITE_REQUIRED` | test catalogue cannot be trusted/enumerated; emit no invented names |
+| `64` | `USAGE_ERROR` | invalid invocation or empty changed-path input |
+| `65` | `INPUT_ERROR` | required input failed where no safe enumerated result can be produced |
+| `70` | `INTERNAL_ERROR` | unexpected invariant/exception boundary |
+
+`10` and `11` are intentionally non-zero so CI integration cannot silently overlook a safety fallback.
+
+### Cases that prevent narrow selection
+
+Examples include:
+
+- missing, malformed, or unsupported CTest metadata;
+- missing or ambiguous CMake File API replies/configurations;
+- root or target-reference mismatches;
+- missing, duplicate, malformed, or detectably stale `.d` evidence;
+- wrapper/interpreter-style test commands;
+- zero or multiple executable-artifact matches;
+- generated/custom-command relationships outside the MVP model;
+- unknown changed paths;
+- changed `CMakeLists.txt` or `.cmake` files;
+- unknown target dependency edges.
+
+See [`SAFETY-CONTRACT.md`](SAFETY-CONTRACT.md) for the complete policy.
+
+---
+
+## Explainable by construction
+
+Human mode can expose the evidence used for a selection:
+
+```text
+STATUS: SUBSET_SELECTED
+
+Selected tests (1):
+  AlphaTest
+
+Reason for AlphaTest:
+  changed path: include/alpha.hpp
+  dependency file: CMakeFiles/alpha.dir/src/alpha.cpp.o.d
+  translation unit: src/alpha.cpp
+  owning target: alpha
+  dependent target: alpha_test
+  registered test: AlphaTest
+```
+
+The important property is not just *what* was selected, but *why that selection was permitted*.
+
+---
+
 ## Supported MVP boundary
 
-The supported, tested MVP is deliberately narrow:
+The current verified boundary is intentionally narrow:
 
 - Linux;
 - C++20;
@@ -85,106 +203,22 @@ The supported, tested MVP is deliberately narrow:
 - CMake File API codemodel major version 2;
 - CTest `ctestInfo` JSON major version 1;
 - one explicit or unambiguous CMake configuration;
-- CMake Unix Makefiles-style object/dependency layout matching `CMakeFiles/<target>.dir/...`;
+- CMake Unix Makefiles-style dependency-target layout matching `CMakeFiles/<target>.dir/...`;
 - direct CTest executable commands that map exactly to one CMake executable artifact;
-- UTF-8/ASCII project paths with no embedded NUL/newline.
+- UTF-8/ASCII project paths without embedded NUL/newline.
 
-Unknown or unsupported shapes do not trigger heuristic matching; they trigger conservative fallback.
+Unsupported shapes trigger conservative fallback rather than heuristic matching.
 
-## Build
+<details>
+<summary><strong>Why Linux / Unix Makefiles only for the MVP?</strong></summary>
 
-Requirements for **building the executable**:
+The core graph algorithm is not inherently Linux-only. The platform-specific boundary is the dependency evidence and build layout being interpreted safely.
 
-- a C++20 compiler;
-- CMake 3.20+ as build tooling.
+Windows/MSVC, Ninja, and other generators can expose different dependency formats, path semantics, object layouts, or databases. Supporting those honestly requires a separately tested evidence adapter rather than assuming the current `.d` mapping generalizes.
 
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
-cmake --build build
-```
+</details>
 
-Artifact:
-
-```text
-build/diff2test
-```
-
-To build and run the repository test suite:
-
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build
-ctest --test-dir build --output-on-failure
-```
-
-### Is CMake a dependency?
-
-CMake is **permitted external build/input-generation tooling, not a third-party runtime dependency of `diff2test`**.
-
-The organizer explicitly clarified that the compiler/build tool does not count against the runtime-dependency rule, and that parsing files those tools already produced is permitted when disclosed and handled gracefully when absent.
-
-CMake is used externally to build this repository and may be used externally to generate File API metadata. The built `diff2test` process never invokes CMake or links a CMake library. If required CMake/CTest-generated data is unavailable, the program falls back rather than launching the missing producer.
-
-See [`ORGANIZER-CLARIFICATIONS.md`](ORGANIZER-CLARIFICATIONS.md), [`STDLIB.md`](STDLIB.md), and [`DEPENDENCY-PROOF.md`](DEPENDENCY-PROOF.md).
-
-## Generate analysis inputs externally
-
-The following commands are **developer/user workflow commands**. They are not executed by `diff2test`.
-
-### 1. Request the CMake File API codemodel
-
-The query marker belongs in the build tree before configure:
-
-```bash
-cmake -E make_directory fixture/build/.cmake/api/v1/query
-cmake -E touch fixture/build/.cmake/api/v1/query/codemodel-v2
-```
-
-### 2. Configure and build
-
-```bash
-cmake -S fixture -B fixture/build -DCMAKE_BUILD_TYPE=Debug
-cmake --build fixture/build
-```
-
-### 3. Export CTest metadata
-
-```bash
-ctest --test-dir fixture/build --show-only=json-v1 > fixture/build/ctest-info.json
-```
-
-### 4. Produce the explicit dependency-file list
-
-For the controlled Unix Makefiles fixture:
-
-```bash
-find fixture/build -type f -name '*.o.d' -printf '%P\n' | sort > fixture/build/deps.txt
-```
-
-The explicit list is intentional. The kickoff spike observed unrelated `.d` files such as `link.d`; recursively treating every `.d` file as compiler dependency evidence would be unsafe.
-
-### 5. Supply changed paths
-
-From a plain file:
-
-```bash
-printf 'include/alpha.hpp\n' > fixture/changed.txt
-```
-
-Or externally from Git:
-
-```bash
-git diff --name-only origin/main...HEAD | ./build/diff2test analyze \
-  --project-root "$(pwd)" \
-  --build-root "$(pwd)/build" \
-  --changed-files - \
-  --cmake-reply build/.cmake/api/v1/reply \
-  --ctest-info build/ctest-info.json \
-  --dep-list build/deps.txt \
-  --format names
-```
-
-Git is outside the process. `diff2test` only reads stdin.
+---
 
 ## CLI
 
@@ -210,139 +244,174 @@ Useful commands:
 ./build/diff2test --version
 ```
 
-### Output modes
+### Machine-friendly use with Git
 
-`--format names` emits only selected test names on stdout, one per line. Diagnostics and fallback reasons go to stderr.
+Git can feed changed paths externally through stdin:
 
-`--format human` emits a readable report. Add `--explain` to show the evidence chain for each selected test.
+```bash
+git diff --name-only origin/main...HEAD | ./build/diff2test analyze \
+  --project-root "$(pwd)" \
+  --build-root "$(pwd)/build" \
+  --changed-files - \
+  --cmake-reply build/.cmake/api/v1/reply \
+  --ctest-info build/ctest-info.json \
+  --dep-list build/deps.txt \
+  --format names
+```
 
-## Safety outcomes and exit statuses
+Git is run by the caller's workflow; `diff2test` only reads stdin.
 
-| Exit | Outcome | Meaning |
-|---:|---|---|
-| `0` | `SUBSET_SELECTED` | complete supported evidence justified the emitted selection |
-| `10` | `FULL_SUITE_SELECTED` | catalogue is known, but other evidence is unsafe; all known tests are emitted |
-| `11` | `FULL_SUITE_REQUIRED` | test catalogue cannot be trusted/enumerated; no test names are invented |
-| `64` | `USAGE_ERROR` | invalid invocation or empty changed-path input |
-| `65` | `INPUT_ERROR` | required input failed in a context where no safe enumerated result is available |
-| `70` | `INTERNAL_ERROR` | unexpected invariant/exception boundary |
+---
 
-Exit `10` and `11` are deliberately nonzero so CI integrations cannot silently overlook a fallback state.
+## Zero-runtime-dependency design
 
-## Safety behavior
-
-A proper selective result is committed only after the complete evidence audit passes. Examples that prevent a narrow result include:
-
-- missing/malformed/unsupported CTest catalogue;
-- missing or ambiguous File API reply/configuration;
-- target-reference or root mismatch;
-- missing, duplicate, malformed, or detectably stale `.d` evidence;
-- wrapper/interpreter-style CTest commands;
-- zero/multiple executable-artifact matches;
-- generated source/custom-command relationships outside the MVP model;
-- unknown changed project paths;
-- changed `CMakeLists.txt` or `.cmake` configuration input;
-- unknown target dependency edges.
-
-Detectable staleness is checked by comparing required project-prerequisite timestamps with their `.d` files. Passing this check means **no staleness was detected under that policy**, not that metadata is cryptographically bound to source contents.
-
-For the detailed rules, see [`SAFETY-CONTRACT.md`](SAFETY-CONTRACT.md).
-
-## Why exact mapping instead of heuristics?
-
-CTest executable mapping uses normalized artifact paths. Basename-only matching and naming conventions such as `*_test` are intentionally rejected because two unrelated artifacts can share a basename or a wrapper may alter the true executable boundary.
-
-Similarly, unknown changed paths are not ignored by extension: a `.md`, `.txt`, or generated input can still affect a test through tooling not modeled by the MVP.
-
-## Verification
-
-The public CI currently verifies:
-
-- seven C++ test executables;
-- strict JSON parser cases and resource limits;
-- a 10,000-prerequisite dependency-parser stress case;
-- path/root-containment cases;
-- CTest and CMake metadata loader cases;
-- safety mutation cases;
-- detectably stale `.d` fallback;
-- target chain, diamond, and cycle traversal;
-- metadata/input-order invariance;
-- byte-identical stdout/stderr across reordered evidence and 20 repeated real-fixture analyses;
-- real `alpha.hpp -> AlphaTest` selection;
-- real `features_shared.hpp -> AlphaTest + BetaTest` selection;
-- real missing-evidence full-suite fallback;
-- missing-catalogue `FULL_SUITE_REQUIRED` behavior;
-- stdin/file changed-path equivalence;
-- CLI usage-error semantics;
-- source audit for runtime process-spawn APIs;
-- Linux dynamic-link inspection;
-- AddressSanitizer + UndefinedBehaviorSanitizer test runs;
-- two clean same-runner Release builds compared byte-for-byte.
-
-## Zero-dependency design
-
-Runtime implementation is a single source file:
+The entire runtime implementation lives in one source file:
 
 ```text
 diff2test.cpp
 ```
 
-There is no vendored third-party source and no runtime package manager/library dependency. Tests, fixtures, build scripts, CI, and documentation are separate development/submission material.
+No vendored third-party runtime source, package manager, service client, plugin system, or runtime subprocess mechanism is used.
 
-The implementation replaces common packages with C++20 standard-library facilities and purpose-built parsers/graph logic. See [`STDLIB.md`](STDLIB.md) for the concrete substitution log and [`DEPENDENCY-PROOF.md`](DEPENDENCY-PROOF.md) for the runtime-dependency audit.
+Capabilities commonly delegated to libraries were implemented with C++20 standard-library primitives and purpose-built code, including:
 
-## Package Killer bonus
+- CLI parsing;
+- strict JSON parsing;
+- UTF-8 and JSON Unicode-escape handling;
+- filesystem/path containment;
+- Make-style `.d` parsing;
+- graph representation and traversal;
+- deterministic formatting;
+- error/result handling;
+- repository test harnesses.
 
-The Package Killer comparison target is **RTS++ / Ekstazi++**, an open-source Regression Test Selection tool for C++. Its build requires LLVM, builds an LLVM pass and `ekstazi-lib`, and installs CMake package/export files; its README also points to separate SHA-512 source as a dependency.
+See [`STDLIB.md`](STDLIB.md) for the full substitution log and [`DEPENDENCY-PROOF.md`](DEPENDENCY-PROOF.md) for the runtime dependency audit.
 
-For the narrower supported CMake/CTest workflow, `diff2test` removes that dedicated RTS package/tool stack from the runtime path by reusing metadata the build already produced and implementing the required parsing, graph traversal, mapping, explanations, and conservative fallback with C++20 standard-library facilities.
+### Is CMake a dependency?
 
-This is **not** a claim of drop-in equivalence with every RTS++ feature. See [`PACKAGE-KILLER.md`](PACKAGE-KILLER.md) for the evidence-backed side-by-side comparison and explicit non-replacement scope.
+CMake is **external build/input-generation tooling, not a third-party runtime dependency of the shipped executable**.
+
+The organizer explicitly clarified that build tools are permitted and that pre-generated CMake/CTest output may be parsed when disclosed and handled gracefully when absent. `diff2test` never launches those tools itself.
+
+---
+
+## Verification
+
+The public CI verifies much more than a happy path:
+
+- **7** dependency-free C++ test executables;
+- strict JSON grammar, UTF-8, Unicode and resource-boundary cases;
+- a **10,000-prerequisite** dependency-parser stress case;
+- lexical path/root containment and escape cases;
+- CMake and CTest metadata validation;
+- missing/malformed/duplicate/stale/ambiguous evidence mutations;
+- chain, diamond, cycle and unaffected graph shapes;
+- exact executable-artifact mapping;
+- real `alpha.hpp → AlphaTest` selection;
+- real shared-header `→ AlphaTest + BetaTest` selection;
+- real missing-evidence full-suite fallback;
+- missing-catalogue `FULL_SUITE_REQUIRED` behavior;
+- stdin/file input equivalence;
+- byte-identical output under reordered evidence;
+- **20 repeated real-fixture analyses** with byte-stable stdout/stderr;
+- runtime process-spawn source audit;
+- Linux dynamic-link inspection;
+- separate ASan + UBSan test builds;
+- two independent same-runner Release builds compared byte-for-byte.
+
+Reproducible same-runner Release SHA-256 from the verified build:
+
+```text
+162a6bbf52034f0c468ab2c7c82853a449590530768e9ed6ddd82f1b7aabc903
+```
+
+---
+
+## Hackathon bonus evidence
+
+| Bonus | Evidence |
+|---|---|
+| **Single File · +5** | runtime implementation is only `diff2test.cpp` |
+| **Reproducible Build · +5** | two clean same-runner Release binaries compared byte-for-byte |
+| **STDLIB Log · +3** | `STDLIB.md` documents 10+ genuine package/category substitutions |
+| **Package Killer · +3 claimed** | `PACKAGE-KILLER.md` compares the supported RTS use case against RTS++ / Ekstazi++ |
+
+### Package Killer
+
+The primary comparison target is **RTS++ / Ekstazi++**, an open-source Regression Test Selection tool for C++ whose build uses LLVM, an LLVM pass, `ekstazi-lib`, CMake package/export files, and separately sourced SHA-512 implementation code.
+
+For the narrower supported CMake/CTest workflow, `diff2test` replaces the dedicated RTS package/tool stack in the runtime path by consuming existing build metadata and implementing the necessary parsing, mapping, traversal, explanation, and conservative fallback in one C++20 source file.
+
+This is deliberately **not** a drop-in-equivalence claim for every RTS++ capability.
+
+See [`PACKAGE-KILLER.md`](PACKAGE-KILLER.md) for the evidence-backed comparison.
+
+---
 
 ## Project structure
 
 ```text
 diff2test.cpp             single runtime implementation source
 CMakeLists.txt             build/test configuration
-tests/                     repository tests; not runtime code
+tests/                     dependency-free repository tests
 fixture/                   controlled CMake/CTest integration fixture
-.github/workflows/ci.yml   development verification
+.github/workflows/ci.yml   public verification
+README.md                  product overview and quick start
 STDLIB.md                  zero-dependency substitution log
-PACKAGE-KILLER.md          C++ RTS tool/package comparison
-DEPENDENCY-PROOF.md        runtime dependency evidence and reproduction
+PACKAGE-KILLER.md          C++ RTS package/tool comparison
+DEPENDENCY-PROOF.md        runtime dependency and reproducibility evidence
 SAFETY-CONTRACT.md         conservative selection rules
-INPUT-SPEC.md              supported input formats/boundaries
+INPUT-SPEC.md              supported input formats and boundaries
 CLI-CONTRACT.md            command/output/exit contract
+FINAL-AUDIT.md             planning-to-implementation reconciliation
 WORKLOG.md                 in-window implementation record
 ```
 
-## Tradeoffs and limitations
+---
 
-The design intentionally chooses auditability and safe fallback over breadth.
+## Documentation
 
-Not claimed in the MVP:
+| Document | What it proves / explains |
+|---|---|
+| [`STDLIB.md`](STDLIB.md) | what packages/categories were replaced with stdlib and purpose-built code |
+| [`DEPENDENCY-PROOF.md`](DEPENDENCY-PROOF.md) | runtime linkage, process-spawn audit, reproducible build evidence |
+| [`PACKAGE-KILLER.md`](PACKAGE-KILLER.md) | narrow RTS++ / Ekstazi++ Package Killer comparison |
+| [`SAFETY-CONTRACT.md`](SAFETY-CONTRACT.md) | conditions required before a subset may be emitted |
+| [`INPUT-SPEC.md`](INPUT-SPEC.md) | exact supported input formats and limits |
+| [`CLI-CONTRACT.md`](CLI-CONTRACT.md) | commands, outputs, and stable exit statuses |
+| [`DEMO-SCRIPT.md`](DEMO-SCRIPT.md) | frozen under-five-minute demo flow |
+| [`FINAL-AUDIT.md`](FINAL-AUDIT.md) | final MVP completion and scope reconciliation |
+| [`WORKLOG.md`](WORKLOG.md) | implementation timeline during the hackathon window |
+
+---
+
+## Limitations
+
+`diff2test` intentionally does **not** claim support for:
 
 - Windows/MSVC dependency formats;
 - Ninja `.ninja_deps`;
-- recursive `.d` auto-discovery across arbitrary generators;
-- wrapper/interpreter test commands;
+- arbitrary CMake generators;
+- recursive unsafe `.d` discovery;
+- wrapper/interpreter CTest commands;
 - generated/custom-command dependency chains;
-- CMake-language interpretation;
+- parsing CMake language itself;
 - raw Git patch parsing;
-- coverage/history/ML selection;
-- absolute freshness guarantees;
-- executing the selected tests.
+- coverage/history/ML-based selection;
+- absolute proof that metadata matches source contents;
+- executing selected tests;
+- cross-platform or cross-toolchain reproducible binaries.
 
-A mature third-party JSON/CLI/graph stack would provide broader format support and conveniences. The point of this entry is to show how far the C++ standard library can go while preserving an explicit safety model.
+Those are scope boundaries, not silent assumptions.
 
-## Development-tool boundary
-
-CMake, CTest, Git, compilers, `ldd`, sanitizers, and shell commands in CI are development/build/proof tooling. None are invoked by the runtime artifact. The event clarification and this repository consistently distinguish those tools from third-party runtime dependencies.
+---
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE).
+Released under the [MIT License](LICENSE).
 
-## Evidence and references
+<div align="center">
 
-Primary format references and organizer-rule notes are recorded in [`SOURCES.md`](SOURCES.md), [`SPIKE-RESULTS.md`](SPIKE-RESULTS.md), and [`ORGANIZER-CLARIFICATIONS.md`](ORGANIZER-CLARIFICATIONS.md).
+**Complete evidence gives a smaller suite. Uncertainty gives everything.**
+
+</div>
