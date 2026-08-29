@@ -209,3 +209,7 @@ The public video URL should be added to the actual hackathon form (and optionall
 ## License
 
 MIT.
+
+## Preferred shorthand workflow
+
+The primary demonstration uses `git diff --name-only HEAD~1 | diff2test analyze .` after required metadata has been generated externally. This does not make Git a runtime dependency: the caller's shell launches Git and writes newline-delimited paths to stdin; `diff2test` only consumes stdin and existing metadata files. Conventional metadata locations are deterministic defaults, with all explicit legacy flags retained as overrides.

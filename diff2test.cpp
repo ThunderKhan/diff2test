@@ -1280,6 +1280,9 @@ Result analyze(const cli::AnalyzeOptions &opt) {
   if (!std::filesystem::is_directory(opt.cmake_reply))
     return full("CMake reply directory not found at " +
                 opt.cmake_reply.string());
+  if (!std::filesystem::is_directory(opt.cmake_reply))
+    return full("CMake reply directory not found at " +
+                opt.cmake_reply.string());
   auto model = cmake::load(opt.cmake_reply, opt.cmake_index, opt.configuration);
   if (!model.ok())
     return full(model.error);

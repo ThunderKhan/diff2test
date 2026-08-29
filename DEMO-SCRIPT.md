@@ -185,3 +185,7 @@ Say:
 Public CI exercises clean checkout/build, shorthand-vs-fully-explicit equivalence, default stdin input, explicit overrides, narrow selection, shared-header selection, missing-evidence fallback, missing-catalogue behavior, deterministic output, dynamic-link inspection, subprocess audit, sanitizers, and same-toolchain reproducible Release builds.
 
 The only parts that cannot be automated by the repository are the human narration, screen recording, upload, and final video-link insertion.
+
+## Shorthand CLI beat
+
+After showing that the CTest catalogue and dependency list were generated externally, run `git diff --name-only HEAD~1 | ./build/diff2test analyze .`. Say: “diff2test never runs Git, CMake, or CTest; it consumes changed paths and metadata those tools already produced.”

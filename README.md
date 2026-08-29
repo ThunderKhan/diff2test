@@ -78,6 +78,19 @@ For every selected test, `--explain` can show a concrete evidence chain from the
 
 > **diff2test never runs Git, CMake, or CTest; it consumes changed paths and metadata those tools already produced.**
 
+For the conventional `build/` layout, generate the catalogue and dependency-file list externally, then compose changed paths through stdin:
+
+```bash
+ctest --test-dir build --show-only=json-v1 > build/ctest-info.json
+find build -type f -name '*.o.d' -printf '%P\n' | sort > build/deps.txt
+git diff --name-only HEAD~1 | ./build/diff2test analyze .
+```
+
+The shell launches `git`, `ctest`, and `find`; `diff2test` launches nothing. The shorthand defaults to `./build`, stdin, `build/.cmake/api/v1/reply`, `build/ctest-info.json`, and `build/deps.txt`. Every default has an explicit override.
+
+
+> **diff2test never runs Git, CMake, or CTest; it consumes changed paths and metadata those tools already produced.**
+
 ### 1. Build `diff2test`
 
 ```bash

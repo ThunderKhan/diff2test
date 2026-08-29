@@ -154,3 +154,7 @@ Those limits are part of the safety design, not hidden compatibility claims.
 - [x] Package Killer target and feature/dependency comparison documented in `PACKAGE-KILLER.md`
 - [x] Package Killer scope is explicitly narrower than a drop-in RTS++ replacement
 - [x] dependency-proof document linked
+
+## Convention-based CLI composition
+
+The shorthand interface uses `std::filesystem` for deterministic path composition and `std::cin` for changed paths supplied through a Unix pipeline. No subprocess facility is introduced: `system`, `popen`, `fork`, `exec`, `posix_spawn`, and equivalents remain absent from the runtime. Git, CMake, CTest, the compiler, and shell utilities are caller-side tools only.
