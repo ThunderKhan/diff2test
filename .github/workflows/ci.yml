@@ -59,6 +59,49 @@ jobs:
           test "$status" -eq 0
           test "$output" = 'AlphaTest'
 
+      - name: Verify byte-stable deterministic output
+        shell: bash
+        run: |
+          sort -r fixture/build/deps.txt > fixture/build/deps-reversed.txt
+          printf 'include/alpha.hpp\ninclude/alpha.hpp\n' > fixture/changed-duplicates.txt
+
+          build/diff2test analyze \
+            --project-root "$(pwd)/fixture" \
+            --build-root "$(pwd)/fixture/build" \
+            --changed-files fixture/changed.txt \
+            --cmake-reply fixture/build/.cmake/api/v1/reply \
+            --ctest-info fixture/build/ctest-info.json \
+            --dep-list fixture/build/deps.txt \
+            --format human --explain \
+            > fixture/build/deterministic-a.out 2> fixture/build/deterministic-a.err
+
+          build/diff2test analyze \
+            --project-root "$(pwd)/fixture" \
+            --build-root "$(pwd)/fixture/build" \
+            --changed-files fixture/changed-duplicates.txt \
+            --cmake-reply fixture/build/.cmake/api/v1/reply \
+            --ctest-info fixture/build/ctest-info.json \
+            --dep-list fixture/build/deps-reversed.txt \
+            --format human --explain \
+            > fixture/build/deterministic-b.out 2> fixture/build/deterministic-b.err
+
+          cmp fixture/build/deterministic-a.out fixture/build/deterministic-b.out
+          cmp fixture/build/deterministic-a.err fixture/build/deterministic-b.err
+
+          for iteration in $(seq 1 20); do
+            build/diff2test analyze \
+              --project-root "$(pwd)/fixture" \
+              --build-root "$(pwd)/fixture/build" \
+              --changed-files fixture/changed.txt \
+              --cmake-reply fixture/build/.cmake/api/v1/reply \
+              --ctest-info fixture/build/ctest-info.json \
+              --dep-list fixture/build/deps.txt \
+              --format human --explain \
+              > fixture/build/repeat.out 2> fixture/build/repeat.err
+            cmp fixture/build/deterministic-a.out fixture/build/repeat.out
+            cmp fixture/build/deterministic-a.err fixture/build/repeat.err
+          done
+
       - name: Verify real missing-evidence fallback
         shell: bash
         run: |
