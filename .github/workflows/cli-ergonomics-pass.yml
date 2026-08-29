@@ -19,7 +19,7 @@ jobs:
           git fetch origin cli-ergonomics
           git checkout -B cli-ergonomics origin/cli-ergonomics
 
-      - name: Apply refactor
+      - name: Apply refactor and docs
         run: |
           python3 tools/cli_refactor.py
           clang-format -i diff2test.cpp
@@ -75,6 +75,7 @@ jobs:
         run: |
           git config user.name github-actions
           git config user.email github-actions@users.noreply.github.com
-          git add diff2test.cpp
+          git add diff2test.cpp .github/workflows/ci.yml README.md CLI-CONTRACT.md INPUT-SPEC.md STDLIB.md SUBMISSION.md DEMO-SCRIPT.md
+          git rm tools/cli_refactor.py .github/workflows/cli-ergonomics-pass.yml
           git commit -m 'feat: simplify analyze CLI defaults'
           git push origin HEAD:cli-ergonomics
