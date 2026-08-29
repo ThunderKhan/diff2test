@@ -9,15 +9,31 @@
 - Unsupported major format versions are never parsed optimistically.
 - Malformed structured inputs are never treated as empty evidence.
 - Paths are compared only after lexical normalization under declared roots.
+- Convention defaults are deterministic path composition, never heuristic searching.
+
+Default locations/source for `diff2test analyze [project-root]` are:
+
+```text
+project-root    .
+build-root      <project-root>/build
+changed paths   stdin
+CMake reply     <build-root>/.cmake/api/v1/reply
+CTest JSON      <build-root>/ctest-info.json
+dependency list <build-root>/deps.txt
+```
+
+Every default can be overridden explicitly.
 
 ## 2. Changed-files input
 
 ### Source
 
-Exactly one of:
+Default: stdin.
+
+Overrides:
 
 - `--changed-files <path>`
-- `--changed-files -` for stdin
+- `--changed-files -` explicitly selects stdin
 
 ### Grammar
 
@@ -31,7 +47,7 @@ Exactly one of:
 
 ### Path form
 
-- preferred form: relative to `--project-root` using `/` separators;
+- preferred form: relative to the project root using `/` separators;
 - absolute paths are accepted only if normalization proves they remain within the permitted project/build model;
 - `.` and `..` are resolved lexically;
 - root escape is rejected;
@@ -40,23 +56,33 @@ Exactly one of:
 
 ### Git boundary
 
-A user's shell may produce this file or pipe newline-delimited paths from Git. diff2test does not parse raw patches, invoke Git, or support Git-specific rename/status syntaxes in the MVP.
+A user's shell may produce a changed-path file or pipe newline-delimited paths from Git. `diff2test` does not parse raw patches, invoke Git, or support Git-specific rename/status syntaxes in the MVP.
+
+For example:
+
+```bash
+git diff --name-only HEAD~1 | diff2test analyze .
+```
+
+launches Git in the caller's shell. `diff2test` only reads stdin.
 
 Deleted or renamed paths that no longer appear in current evidence safely cause full-suite behavior when they cannot be mapped.
 
 ### Empty list
 
-An empty changed-path list is a usage error because it commonly indicates a broken caller pipeline.
+An empty changed-path list, including empty stdin, is a usage error because it commonly indicates a broken caller pipeline.
 
 ## 3. CMake File API reply
 
 ### Location
 
-`--cmake-reply <directory>` points to a CMake File API v1 reply directory, normally:
+The default CMake File API v1 reply directory is:
 
 ```text
-<build>/.cmake/api/v1/reply
+<build-root>/.cmake/api/v1/reply
 ```
+
+`--cmake-reply <directory>` overrides that location.
 
 The File API query is created externally under the build tree before CMake configure. CMake is permitted build/input-generation tooling under the organizer ruling; diff2test never invokes it at runtime.
 
@@ -93,13 +119,23 @@ Generated sources/custom-command chains are not modeled by the current MVP. Enco
 
 The metadata spike found that CMake build trees can contain `.d` files that are not compiler prerequisite evidence, such as `link.d`. The MVP therefore deliberately does **not** scan every `.d` file recursively.
 
-The supported input is:
+The supported input is a dependency-list file. Its conventional default is:
 
 ```text
---dep-list <file>
+<build-root>/deps.txt
 ```
 
-The list contains one dependency-file path per line. Relative entries are resolved under `--build-root`. These dependency files must already have been produced by the external compiler/build workflow; diff2test never launches the compiler or build tool.
+`--dep-list <file>` overrides that path.
+
+The list contains one dependency-file path per line. Relative entries are resolved under the build root. These dependency files must already have been produced by the external compiler/build workflow; diff2test never launches the compiler or build tool.
+
+A caller may generate the list externally, for example:
+
+```bash
+find build -type f -name '*.o.d' -printf '%P\n' | sort > build/deps.txt
+```
+
+That external discovery command is not part of the `diff2test` runtime. More importantly, `diff2test` still validates every listed dependency rule against known CMake targets and translation units before subset selection.
 
 ### Supported syntax
 
@@ -142,7 +178,7 @@ For each listed `.d` file, diff2test:
 
 1. reads the dependency file's modification timestamp;
 2. normalizes every prerequisite;
-3. for prerequisites inside `--project-root`, reads the prerequisite modification timestamp;
+3. for prerequisites inside the project root, reads the prerequisite modification timestamp;
 4. rejects the dependency evidence if a project prerequisite is newer than the `.d` file;
 5. also rejects subset output when a required project-prerequisite timestamp cannot be inspected.
 
@@ -156,10 +192,16 @@ External/system prerequisites may appear in `.d` data and are accepted as eviden
 
 ### Source
 
-`--ctest-info <path>` identifies a file previously produced outside diff2test by:
+The default catalogue path is:
+
+```text
+<build-root>/ctest-info.json
+```
+
+`--ctest-info <path>` overrides it. The file is previously produced outside diff2test, for example by:
 
 ```bash
-ctest --show-only=json-v1 > build/ctest-info.json
+ctest --test-dir build --show-only=json-v1 > build/ctest-info.json
 ```
 
 CTest is external input-generation tooling; diff2test never invokes it or executes tests.
@@ -182,7 +224,11 @@ Wrapper/interpreter commands, zero matches, and ambiguous artifact matches preve
 
 ## 6. Project and build roots
 
-- `--project-root` and `--build-root` must exist and be directories;
+- positional project root defaults to `.`;
+- `--project-root <dir>` is the explicit alternative; using both forms is a usage error;
+- build root defaults to `<project-root>/build`;
+- `--build <dir>` or `--build-root <dir>` overrides the default; using both is a usage error;
+- project and build roots must exist and be directories;
 - normalized declared roots must match the codemodel source/build roots;
 - referenced File API metadata must stay within its declared reply container;
 - dependency prerequisites may include external/system paths as evidence;
@@ -212,7 +258,7 @@ Exceeding a configured limit is a safe analysis failure rather than a crash or p
 
 | Input/condition | Safety result |
 |---|---|
-| changed paths missing/unreadable/empty | usage error / no subset |
+| changed paths unreadable/empty, including empty stdin | usage error / no subset |
 | CTest catalogue missing or untrusted | `FULL_SUITE_REQUIRED` |
 | CMake reply/codemodel missing, malformed, ambiguous, or root-mismatched | `FULL_SUITE_SELECTED` when catalogue known |
 | dependency list or required `.d` missing/malformed | `FULL_SUITE_SELECTED` when catalogue known |
@@ -230,13 +276,18 @@ The public CI exercises the real controlled fixture on Linux with CMake and the 
 
 - File API codemodel replies;
 - compiler `.o.d` files;
+- dependency list;
 - CTest `json-v1` catalogue.
 
-CI then verifies that changing `include/alpha.hpp` selects exactly `AlphaTest`, and that removing required dependency evidence widens to `AlphaTest`, `BetaTest`, and `CoreTest` with exit status 10.
+CI verifies that changing `include/alpha.hpp` selects exactly `AlphaTest`, that the shorthand and fully explicit CLI produce the same result, and that removing required dependency evidence widens to `AlphaTest`, `BetaTest`, and `CoreTest` with exit status 10.
 
 That test validates the documented controlled environment only; it does not broaden the generator/platform support claim.
 
-## 11. Future inputs not in MVP
+## 11. Deterministic conventions
+
+The shorthand interface composes paths only from the declared/default project and build roots. It does not probe alternative build directories, search for CTest catalogues, or recursively discover `.d` files. Missing conventional metadata follows the same conservative fallback rules as missing explicitly named metadata.
+
+## 12. Future inputs not in MVP
 
 - recursive `--dep-root` discovery without a proven generator-specific policy
 - `compile_commands.json`
