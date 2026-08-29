@@ -9,3 +9,6 @@ fixture/changed.txt
 # Release artifacts
 diff2test-linux-x86_64
 SHA256SUMS.txt
+
+# Local brag-video renders
+brag-output-*/
