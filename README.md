@@ -76,6 +76,8 @@ For every selected test, `--explain` can show a concrete evidence chain from the
 
 ## Quick start
 
+> **diff2test never runs Git, CMake, or CTest; it consumes changed paths and metadata those tools already produced.**
+
 ### 1. Build `diff2test`
 
 ```bash
@@ -89,48 +91,75 @@ The executable is produced at:
 build/diff2test
 ```
 
-### 2. Generate fixture metadata externally
+### 2. Generate metadata externally
 
-These commands are part of the developer/user workflow. They are **not** executed by `diff2test`.
+These commands are part of the caller/developer workflow. They are **not** executed by `diff2test`.
 
 ```bash
-cmake -E make_directory fixture/build/.cmake/api/v1/query
-cmake -E touch fixture/build/.cmake/api/v1/query/codemodel-v2
-cmake -S fixture -B fixture/build -DCMAKE_BUILD_TYPE=Debug
-cmake --build fixture/build
-ctest --test-dir fixture/build --show-only=json-v1 > fixture/build/ctest-info.json
-find fixture/build -type f -name '*.o.d' -printf '%P\n' | sort > fixture/build/deps.txt
+cmake -E make_directory build/.cmake/api/v1/query
+cmake -E touch build/.cmake/api/v1/query/codemodel-v2
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build --show-only=json-v1 > build/ctest-info.json
+find build -type f -name '*.o.d' -printf '%P\n' | sort > build/deps.txt
 ```
 
-### 3. Analyze a change
+The `.d` list is generated externally because `diff2test` deliberately does not recursively accept every `.d` file under a build tree. The analysis engine still validates each listed dependency file against known CMake targets and translation units.
+
+### 3. Analyze changed paths
+
+Preferred common case:
 
 ```bash
-printf 'include/alpha.hpp\n' > fixture/changed.txt
+git diff --name-only HEAD~1 | ./build/diff2test analyze .
+```
 
+With a conventional `build/` directory, that shorthand means:
+
+```text
+project root   = .
+build root     = ./build
+changed paths  = stdin
+CMake reply    = ./build/.cmake/api/v1/reply
+CTest catalogue= ./build/ctest-info.json
+dependency list= ./build/deps.txt
+```
+
+The shell launches `git` and creates the pipe. `diff2test` only reads stdin and existing files.
+
+Explicit overrides remain available:
+
+```bash
+# Explicit build directory
+git diff --name-only HEAD~1 | ./build/diff2test analyze . --build build-debug
+
+# Explicit changed-file source
+./build/diff2test analyze . --changed-files changed.txt
+
+# Fully explicit legacy/advanced form
 ./build/diff2test analyze \
-  --project-root "$(pwd)/fixture" \
-  --build-root "$(pwd)/fixture/build" \
-  --changed-files fixture/changed.txt \
-  --cmake-reply fixture/build/.cmake/api/v1/reply \
-  --ctest-info fixture/build/ctest-info.json \
-  --dep-list fixture/build/deps.txt \
-  --format names
+  --project-root . \
+  --build-root build \
+  --changed-files changed.txt \
+  --cmake-reply build/.cmake/api/v1/reply \
+  --ctest-info build/ctest-info.json \
+  --dep-list build/deps.txt
 ```
 
-Verified output:
+For the controlled fixture, changing `include/alpha.hpp` selects:
 
 ```text
 AlphaTest
 ```
 
-A shared-header change is also verified to select exactly:
+A shared-header change selects exactly:
 
 ```text
 AlphaTest
 BetaTest
 ```
 
-If required dependency evidence is removed, the tool returns exit `10` and emits the full known fixture suite:
+If required dependency evidence is missing or unsafe, the tool returns exit `10` and emits the full known fixture suite:
 
 ```text
 AlphaTest
@@ -231,19 +260,31 @@ Windows/MSVC, Ninja, and other generators can expose different dependency format
 ## CLI
 
 ```text
-diff2test analyze \
-  --project-root <dir> \
-  --build-root <dir> \
-  --changed-files <file|-> \
-  --cmake-reply <dir> \
-  --ctest-info <file> \
-  --dep-list <file> \
+diff2test analyze [project-root] \
+  [--build <dir> | --build-root <dir>] \
+  [--changed-files <file|->] \
+  [--cmake-reply <dir>] \
+  [--ctest-info <file>] \
+  [--dep-list <file>] \
   [--cmake-index <file>] \
   [--configuration <name>] \
   [--format human|names] \
   [--explain] \
   [--verbose]
 ```
+
+Defaults:
+
+```text
+project-root    .
+build-root      <project-root>/build
+changed-files   stdin
+cmake-reply     <build-root>/.cmake/api/v1/reply
+ctest-info      <build-root>/ctest-info.json
+dep-list        <build-root>/deps.txt
+```
+
+`--build` is a convenience alias for `--build-root`. Supplying both is a usage error. Supplying both a positional project root and `--project-root` is also a usage error.
 
 Useful commands:
 
@@ -257,14 +298,7 @@ Useful commands:
 Git can feed changed paths externally through stdin:
 
 ```bash
-git diff --name-only origin/main...HEAD | ./build/diff2test analyze \
-  --project-root "$(pwd)" \
-  --build-root "$(pwd)/build" \
-  --changed-files - \
-  --cmake-reply build/.cmake/api/v1/reply \
-  --ctest-info build/ctest-info.json \
-  --dep-list build/deps.txt \
-  --format names
+git diff --name-only origin/main...HEAD | ./build/diff2test analyze . --format names
 ```
 
 Git is run by the caller's workflow; `diff2test` only reads stdin.
@@ -317,6 +351,9 @@ The public CI verifies much more than a happy path:
 - exact executable-artifact mapping;
 - real `alpha.hpp → AlphaTest` selection;
 - real shared-header `→ AlphaTest + BetaTest` selection;
+- shorthand/default CLI and fully explicit CLI equivalence;
+- default stdin changed-path input;
+- explicit override behavior, including `--build`;
 - real missing-evidence full-suite fallback;
 - missing-catalogue `FULL_SUITE_REQUIRED` behavior;
 - stdin/file input equivalence;
