@@ -12,6 +12,17 @@ This audit reconciles the planning/contracts against the current repository and 
 
 **Human-only remaining work:** rehearse the final demo twice, record/upload the video, insert its public URL in the hackathon form (and optionally README), and perform the final form submission.
 
+## Bonus status
+
+| Bonus | Status | Evidence |
+|---|---|---|
+| Single File (+5) | ✅ | runtime implementation is only `diff2test.cpp`; tests/docs/fixtures are separate development material |
+| Reproducible Build (+5) | ✅ | two clean same-runner Release binaries compared byte-identical; SHA-256 recorded below |
+| STDLIB Log (+3) | ✅ | `STDLIB.md` documents 10+ genuine substitutions actually present in the project |
+| Package Killer (+3) | ✅ documented/claimed | `PACKAGE-KILLER.md` compares the supported workflow with RTS++ / Ekstazi++, a C++ regression-test-selection tool whose build requires LLVM, builds its own RTS library/pass, installs CMake package files, and identifies separate SHA-512 source; the claim is explicitly narrow rather than drop-in equivalence |
+
+Potential documented bonus total: **+16**, subject to organizer/judge acceptance of the Package Killer comparison.
+
 ## Phase 0 — kickoff and feasibility
 
 | Task | Status | Evidence |
@@ -123,6 +134,16 @@ Reproducible Release SHA-256 in that run:
 - no process-spawn API found by CI audit;
 - Linux dynamic links observed only to system/toolchain runtime libraries;
 - CMake/CTest/Git/compiler are explicitly external build/input-generation tooling, never runtime subprocesses.
+
+## Package Killer audit
+
+The dedicated comparison is [`PACKAGE-KILLER.md`](PACKAGE-KILLER.md).
+
+Primary target: **RTS++ / Ekstazi++** (`EngineeringSoftware/ekstazipp`). The upstream repository identifies itself as a C++ Regression Test Selection tool. Its CMake build uses `find_package(LLVM REQUIRED CONFIG)`, builds an LLVM pass and `ekstazi-lib`, and installs CMake package/export configuration. Its README separately identifies SHA-512 source from another repository.
+
+`diff2test` replaces that dedicated RTS stack only for its tested CMake/CTest metadata workflow. The comparison explicitly preserves non-equivalence for arbitrary build systems, LLVM instrumentation workflows, broader test-framework integrations, Windows/MSVC, Ninja dependency databases, and other unsupported shapes.
+
+No runtime implementation changes were made to manufacture this bonus claim; it documents the package/tool class the already-verified stdlib implementation can replace within its supported boundary.
 
 ## Known and intentional limitations
 
