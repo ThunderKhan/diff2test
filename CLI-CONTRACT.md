@@ -18,7 +18,7 @@ diff2test --help
 diff2test --version
 ```
 
-Only `analyze` is required for MVP. Unknown commands and options are usage errors.
+Only `analyze` performs analysis. Unknown commands and options are usage errors.
 
 ## 3. Analyze synopsis
 
@@ -30,168 +30,184 @@ diff2test analyze \
   --cmake-reply <dir> \
   --ctest-info <file> \
   --dep-list <file> \
+  [--cmake-index <file>] \
   [--configuration <name>] \
   [--format human|names] \
   [--explain] \
   [--verbose]
 ```
 
-The kickoff metadata spike found non-compilation `.d` files such as `link.d` in the build tree. To avoid generator-specific guessing, the MVP deliberately requires an explicit `--dep-list`. Recursive `--dep-root` discovery is deferred until a complete and testable mapping policy exists.
+The kickoff metadata spike found non-compilation `.d` files such as `link.d` in the build tree. To avoid generator-specific guessing, the MVP deliberately requires an explicit `--dep-list`. Recursive `--dep-root` discovery is unsupported.
 
 ## 4. Options
 
-| Option | Required | Meaning |
+| Option | Required | Implemented MVP meaning |
 |---|---:|---|
 | `--project-root <dir>` | yes | top-level source root |
 | `--build-root <dir>` | yes | build-tree root |
 | `--changed-files <file|->` | yes | newline-delimited changed paths; `-` reads stdin |
 | `--cmake-reply <dir>` | yes | File API v1 reply directory |
-| `--cmake-index <file>` | no | explicit index when reply directory is ambiguous |
+| `--cmake-index <file>` | no | explicit index when reply-directory selection would otherwise be ambiguous |
 | `--ctest-info <file>` | yes | pre-generated CTest JSON |
-| `--dep-list <file>` | yes | newline-delimited list of compiler dependency files |
-| `--configuration <name>` | conditional | required for multiple codemodel configurations |
-| `--format <value>` | no | `human` default or `names` |
-| `--explain` | no | show evidence paths in human format |
-| `--verbose` | no | show detected versions/files and safety audit detail on stderr |
-| `--no-color` | no/stretch | disable ANSI decoration if color is implemented |
-| `-h`, `--help` | no | help and successful exit |
+| `--dep-list <file>` | yes | newline-delimited explicit list of compiler dependency files |
+| `--configuration <name>` | conditional | selects one codemodel configuration when more than one exists |
+| `--format <value>` | no | `human` (default) or `names` |
+| `--explain` | no | include evidence chains in human output |
+| `--verbose` | no | accepted by the frozen CLI; no additional output is currently emitted by the MVP |
+| `-h`, `--help` | no | print concise usage/options/tool-boundary help and exit 0 |
+| `--version` | no | print version and exit 0 |
+
+The MVP does not implement color or `--no-color`.
 
 ## 5. Runtime prohibition
 
-No CLI option may generate metadata, run tests, invoke Git, or launch any program. Do not add options named `--run`, `--generate`, `--git-base`, or similar during MVP.
+No CLI option generates metadata, runs tests, invokes Git, or launches another program. The runtime contains no supported `--run`, `--generate`, `--git-base`, or similar option.
+
+CMake, CTest, Git, and the compiler may generate inputs externally. `diff2test` only reads the supplied files/stdin.
 
 ## 6. Output contract
 
 ### 6.1 Human subset success
 
+Human mode begins with the symbolic outcome and lists selected tests. With `--explain`, it also emits the concrete evidence chain.
+
+Representative verified shape:
+
 ```text
 STATUS: SUBSET_SELECTED
 
-Changed files:
-  include/parser/token.hpp
+Selected tests (1):
+  AlphaTest
 
-Selected tests (1 of 3):
-  ParserUnitTests
-
-Reason:
-  include/parser/token.hpp
-    -> tests/parser_test.cpp
-    -> parser_tests
-    -> ParserUnitTests
+Reason for AlphaTest:
+  changed path: include/alpha.hpp
+  dependency file: CMakeFiles/alpha.dir/src/alpha.cpp.o.d
+  translation unit: src/alpha.cpp
+  owning target: alpha
+  dependent target: alpha_test
+  registered test: AlphaTest
 ```
+
+The exact dependency-file/target chain reflects the metadata for the analyzed project.
 
 ### 6.2 Names subset success
 
-stdout:
+stdout contains names only:
 
 ```text
-ParserUnitTests
+AlphaTest
 ```
 
-stderr, when verbose or explanation is requested:
-
-```text
-diff2test: SUBSET_SELECTED: selected 1 of 3 tests
-```
+A successful subset has no mandatory stderr summary. Diagnostics/fallback reasons are written to stderr when present.
 
 ### 6.3 Full-known-suite fallback
 
-Human stdout lists all known tests and begins:
+When the CTest catalogue is trustworthy but other evidence is unsafe:
+
+Human stdout begins:
 
 ```text
 STATUS: FULL_SUITE_SELECTED
 ```
 
-stderr:
+Names mode emits every known test, one per line.
+
+stderr uses the stable symbolic status prefix followed by the concrete reason, for example:
 
 ```text
-diff2test: safety fallback: missing dependency evidence for target parser_tests
+diff2test: FULL_SUITE_SELECTED: missing dependency evidence for source src/alpha.cpp in target <target-id>
 ```
 
-Names stdout still emits every known test, one per line, allowing the caller to run them.
+The process exits `10`.
 
 ### 6.4 Catalogue unavailable
 
-stdout in human mode:
+Human mode prints:
 
 ```text
 STATUS: FULL_SUITE_REQUIRED
 ```
 
-stderr:
+stderr contains the reason with the same symbolic prefix, for example:
 
 ```text
-diff2test: cannot enumerate registered tests: CTest metadata is unavailable
-diff2test: run the complete suite using your normal project workflow
+diff2test: FULL_SUITE_REQUIRED: cannot open file: <ctest-json-path>
 ```
 
-Names mode emits no invented names.
+Names mode emits no invented test names. The process exits `11`.
 
 ## 7. stdout/stderr separation
 
 ### stdout
 
-- selected test data;
+- selected/all-known test data;
 - human report body;
-- status marker in human mode.
+- status marker in human mode;
+- evidence chains requested with `--explain`.
 
 ### stderr
 
 - invalid invocation diagnostics;
-- parser/input diagnostics;
-- safety fallback reasons;
-- verbose metadata details;
-- warnings.
+- analysis/fallback reasons;
+- internal-error diagnostics.
 
 Machine consumers using names format can capture stdout without diagnostic contamination.
 
 ## 8. Exit statuses
 
-Recommended stable scheme:
-
-| Code | Symbolic meaning | Description |
+| Code | Symbolic meaning | Implemented meaning |
 |---:|---|---|
-| 0 | `SUBSET_SELECTED` | safe subset, including a provably empty subset if later allowed |
-| 10 | `FULL_SUITE_SELECTED` | analysis uncertainty; all known tests emitted |
-| 11 | `FULL_SUITE_REQUIRED` | suite cannot be enumerated; caller must run its normal full suite |
-| 64 | `USAGE_ERROR` | invalid command/options/empty changed input |
-| 65 | `INPUT_ERROR` | required input unreadable or structurally invalid where no safer enumerated result can be produced |
-| 70 | `INTERNAL_ERROR` | invariant failure or unexpected exception |
+| `0` | `SUBSET_SELECTED` | supported evidence audit completed and the emitted impacted-test set was selected |
+| `10` | `FULL_SUITE_SELECTED` | CTest catalogue is known, but another evidence source is unsafe; all known tests are emitted |
+| `11` | `FULL_SUITE_REQUIRED` | catalogue cannot be trusted/enumerated; caller must run its normal full suite |
+| `64` | `USAGE_ERROR` | invalid command/options or empty changed-path input |
+| `65` | `INPUT_ERROR` | reserved input-error outcome in the core status enum; current conservative analysis paths normally widen to 10/11 instead |
+| `70` | `INTERNAL_ERROR` | unexpected exception/invariant boundary |
 
-Important: shell truthiness normally treats nonzero as failure. CI integration must explicitly handle 10 and 11 as safety statuses, not crash statuses. This deliberate choice makes fallback impossible to overlook. If integration ergonomics suffer, retain the distinction in a `STATUS:` record rather than silently converting fallback to success.
+Important: shell truthiness treats 10 and 11 as failure-like values. Integrations must handle them as deliberate safety statuses, not as crashes. This makes fallback hard to overlook.
 
 ## 9. Deterministic ordering
 
-- changed paths: normalized lexical order;
-- selected tests: lexical name order;
-- fallback reasons: stable category then path order;
-- explanation paths: shortest evidence path, then lexical tie-break;
-- no raw unordered-container iteration in output.
+Verified behavior:
 
-## 10. Help requirements
+- changed paths are sorted/deduplicated before impact classification;
+- selected/fallback test names are lexical because the CTest catalogue is normalized;
+- graph traversal uses ordered adjacency/visited structures;
+- explanation predecessor choice is deterministic for the supported graph;
+- reordered `.d` list input and duplicate changed paths produce byte-identical output in the real fixture;
+- CI repeats the same real analysis 20 times and compares stdout/stderr byte-for-byte.
 
-`--help` shall state:
+## 10. Help contract
 
-- the tool analyzes but never runs tests;
-- metadata must be generated externally;
-- fallback status semantics;
-- supported metadata/platform boundaries;
-- example stdin pipeline;
-- exit-status table or link to README;
-- no external programs are invoked.
+The built-in `--help` is intentionally concise. It states:
 
-## 11. Invalid invocations
+- the available commands;
+- required analyze options;
+- optional analyze flags;
+- `--changed-files <file|->` stdin form;
+- that CMake, CTest, Git, and the compiler may generate input externally;
+- that `diff2test` never launches them or any other program at runtime.
 
-Usage error examples:
+The complete platform/metadata boundaries, external input-generation examples, safety outcomes, and exit table live in `README.md` and this contract rather than duplicating a long manual inside the binary help string.
 
-- missing required option;
-- use of removed/unsupported `--dep-root`;
-- `--changed-files -` while stdin is a terminal, if reliably detectable;
-- unknown format/config option;
+CI verifies the help command succeeds and contains the analyze usage plus the no-launch boundary.
+
+## 11. Invalid invocation and analysis boundaries
+
+Verified usage-error (`64`) cases include:
+
+- missing command;
+- unknown command;
+- unknown option, including removed `--dep-root`;
 - repeated single-valued option;
-- empty changed list without explicit future override;
-- root argument that is not a directory.
+- missing required option/value;
+- invalid `--format` value;
+- empty changed-path list after required metadata/catalogue inputs can be loaded.
+
+Some invalid-looking analysis inputs are deliberately **safety fallbacks**, not usage errors. For example, a declared project/build root that does not match trusted codemodel evidence produces `FULL_SUITE_SELECTED` when the catalogue is known. Unsupported/invalid configuration selection likewise flows through the metadata safety path rather than being guessed through.
+
+The MVP does not attempt TTY detection for `--changed-files -`.
 
 ## 12. Compatibility policy
 
-CLI names and exit statuses freeze at MVP completion. Before that, changes must update `CLI-CONTRACT.md`, `SAFETY-CONTRACT.md`, tests, README examples, and demo commands together.
+The command names, required inputs, output modes, and safety exit statuses are frozen for the hackathon MVP. Any future behavioral expansion should update this contract, `SAFETY-CONTRACT.md`, tests, README examples, and demo commands together.
