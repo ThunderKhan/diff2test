@@ -1,16 +1,16 @@
 <div align="center">
 
-# diff2test
+<img src="assets/diff2test-hero.png" alt="diff2test — zero-runtime-dependency test impact analysis for CMake/CTest" width="100%" />
 
-**Conservative, zero-runtime-dependency test impact analysis for CMake/CTest.**
-
-Select only the tests your build evidence can actually justify — and widen safely when that evidence is incomplete.
+<br />
 
 [![CI](https://github.com/ThunderKhan/diff2test/actions/workflows/ci.yml/badge.svg)](https://github.com/ThunderKhan/diff2test/actions/workflows/ci.yml)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus&logoColor=white)
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime%20dependencies-zero-00b894)
 ![Single File](https://img.shields.io/badge/runtime%20implementation-single%20file-6c5ce7)
 ![License](https://img.shields.io/badge/license-MIT-2ea44f)
+
+Select only the tests your build evidence can actually justify — and widen safely when that evidence is incomplete.
 
 **Zero Dependency Hackathon · Track A: Developer Tools & CLI · `std::zero`**
 
