@@ -12,6 +12,15 @@ Track A — Developer Tools & CLI
 
 `std::zero` — solo
 
+## Bonus claims
+
+- **Single File (+5):** the runtime implementation is one source file, `diff2test.cpp`; tests/docs/fixtures are separate allowed development material.
+- **Reproducible Build (+5):** two clean same-runner Release builds were byte-identical; SHA-256 `162a6bbf52034f0c468ab2c7c82853a449590530768e9ed6ddd82f1b7aabc903`.
+- **STDLIB Log (+3):** `STDLIB.md` documents 10+ genuine third-party-package substitutions implemented with C++20 standard-library facilities and purpose-built code.
+- **Package Killer (+3):** `PACKAGE-KILLER.md` compares `diff2test` with RTS++ / Ekstazi++, an installable C++ regression-test-selection tool whose build requires LLVM and installs its own RTS library/package configuration. `diff2test` replaces that dedicated RTS stack for the narrower supported CMake/CTest metadata workflow without adding third-party runtime code.
+
+The Package Killer claim is intentionally scoped and does **not** claim drop-in equivalence with every RTS++ feature.
+
 ## One-line pitch
 
 `diff2test` is a zero-third-party-runtime-dependency C++20 CLI that turns pre-generated CMake/compiler/CTest metadata into an explainable test-impact graph, selects only tests justified by complete evidence, and falls back to the full suite whenever that evidence becomes uncertain.
@@ -76,7 +85,7 @@ No third-party library, vendored runtime source, package manager, service, netwo
 
 Common library capabilities were replaced with C++20 standard-library primitives and purpose-built code, including CLI parsing, strict JSON parsing, UTF-8/Unicode escape validation, path containment, Make-style `.d` parsing, graph representation/traversal, result handling, diagnostics, formatting, and the repository test harness.
 
-See `STDLIB.md` for the full substitution log.
+See `STDLIB.md` for the full substitution log and `PACKAGE-KILLER.md` for the dedicated RTS comparison.
 
 ## CMake clarification
 
@@ -152,6 +161,14 @@ No CMake library or third-party application library appears. See `DEPENDENCY-PRO
 - concrete per-test evidence chains;
 - deliberate nonzero safety exit statuses so CI cannot silently ignore fallback.
 
+## Package Killer rationale
+
+RTS++ / Ekstazi++ is an open-source C++ regression-test-selection tool. Its CMake build requires LLVM, builds an LLVM pass and `ekstazi-lib`, and installs CMake package export/configuration files; its README also identifies separate SHA-512 source as a dependency.
+
+`diff2test` avoids that dedicated RTS package/toolchain for the supported CMake/CTest workflow by consuming metadata that the existing build already produced and implementing the required parser, graph, mapping, and safety logic with the C++20 standard library.
+
+This comparison is documented in `PACKAGE-KILLER.md` with direct source links and an explicit list of capabilities that `diff2test` does **not** claim to replace.
+
 ## Limitations
 
 Not claimed:
@@ -176,6 +193,7 @@ Recommended files for judges:
 - `README.md` — build, input-generation, usage, safety, limitations;
 - `diff2test.cpp` — single runtime implementation;
 - `STDLIB.md` — standard-library substitution log;
+- `PACKAGE-KILLER.md` — C++ RTS package/tool comparison;
 - `DEPENDENCY-PROOF.md` — runtime dependency/reproducibility evidence;
 - `SAFETY-CONTRACT.md` — safety rules;
 - `fixture/README.md` — controlled real metadata scenarios;
