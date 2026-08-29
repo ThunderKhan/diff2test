@@ -31,21 +31,21 @@ struct TargetSpec {
     std::vector<std::string> dependencies;
 };
 
-std::string quoted(std::string_view value) {
-    return "\"" + std::string(value) + "\"";
+std::string json_quote(const std::string& value) {
+    return "\"" + value + "\"";
 }
 
 std::string target_json(const TargetSpec& target) {
-    std::string json = "{\"id\":" + quoted(target.id) +
-        ",\"name\":" + quoted(target.name) +
-        ",\"type\":" + quoted(target.type) +
-        ",\"sources\":[{\"path\":" + quoted(target.source) + "}]";
+    std::string json = std::string("{\"id\":") + json_quote(target.id) +
+        ",\"name\":" + json_quote(target.name) +
+        ",\"type\":" + json_quote(target.type) +
+        ",\"sources\":[{\"path\":" + json_quote(target.source) + "}]";
     if (target.artifact.empty()) json += ",\"artifacts\":[]";
-    else json += ",\"artifacts\":[{\"path\":" + quoted(target.artifact) + "}]";
+    else json += std::string(",\"artifacts\":[{\"path\":") + json_quote(target.artifact) + "}]";
     json += ",\"dependencies\":[";
     for (std::size_t i = 0; i < target.dependencies.size(); ++i) {
         if (i != 0) json += ',';
-        json += "{\"id\":" + quoted(target.dependencies[i]) + "}";
+        json += std::string("{\"id\":") + json_quote(target.dependencies[i]) + "}";
     }
     json += "]}";
     return json;
@@ -79,14 +79,14 @@ void complex_fixture(const std::filesystem::path& root, bool reverse_metadata_or
     for (std::size_t i = 0; i < targets.size(); ++i) order.push_back(i);
     if (reverse_metadata_order) std::reverse(order.begin(), order.end());
 
-    std::string codemodel = "{\"paths\":{\"source\":" + quoted(project.string()) +
-        ",\"build\":" + quoted(build.string()) +
+    std::string codemodel = std::string("{\"paths\":{\"source\":") + json_quote(project.string()) +
+        ",\"build\":" + json_quote(build.string()) +
         "},\"configurations\":[{\"name\":\"\",\"targets\":[";
     for (std::size_t i = 0; i < order.size(); ++i) {
         if (i != 0) codemodel += ',';
         const auto& target = targets[order[i]];
-        codemodel += "{\"id\":" + quoted(target.id) +
-            ",\"jsonFile\":" + quoted("target-" + target.name + ".json") + "}";
+        codemodel += std::string("{\"id\":") + json_quote(target.id) +
+            ",\"jsonFile\":" + json_quote("target-" + target.name + ".json") + "}";
         put(reply / ("target-" + target.name + ".json"), target_json(target));
     }
     codemodel += "]}]}";
@@ -94,17 +94,16 @@ void complex_fixture(const std::filesystem::path& root, bool reverse_metadata_or
 
     const std::string deep_command = (build / "deep_test").string();
     const std::string other_command = (build / "other_test").string();
+    std::string ctest_json = "{\"kind\":\"ctestInfo\",\"version\":{\"major\":1},\"tests\":[";
     if (reverse_metadata_order) {
-        put(build / "ctest-info.json",
-            "{\"kind\":\"ctestInfo\",\"version\":{\"major\":1},\"tests\":["
-            "{\"name\":\"OtherTest\",\"command\":[" + quoted(other_command) + "]},"
-            "{\"name\":\"DeepTest\",\"command\":[" + quoted(deep_command) + "]}]}" );
+        ctest_json += std::string("{\"name\":\"OtherTest\",\"command\":[") + json_quote(other_command) + "]},";
+        ctest_json += std::string("{\"name\":\"DeepTest\",\"command\":[") + json_quote(deep_command) + "]}";
     } else {
-        put(build / "ctest-info.json",
-            "{\"kind\":\"ctestInfo\",\"version\":{\"major\":1},\"tests\":["
-            "{\"name\":\"DeepTest\",\"command\":[" + quoted(deep_command) + "]},"
-            "{\"name\":\"OtherTest\",\"command\":[" + quoted(other_command) + "]}]}" );
+        ctest_json += std::string("{\"name\":\"DeepTest\",\"command\":[") + json_quote(deep_command) + "]},";
+        ctest_json += std::string("{\"name\":\"OtherTest\",\"command\":[") + json_quote(other_command) + "]}";
     }
+    ctest_json += "]}";
+    put(build / "ctest-info.json", ctest_json);
 
     std::vector<std::string> dep_entries;
     for (const auto& target : targets) {
